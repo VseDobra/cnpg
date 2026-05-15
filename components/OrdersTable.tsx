@@ -6,10 +6,10 @@ const STATUS_STYLES: Record<string, string> = {
   INSTRUCT: 'bg-[#1e3a5f] text-[#0ea5e9]',
   WAITING_DELIVER: 'bg-[#1e3a5f] text-[#0ea5e9]',
   WAIT_DELIVERY: 'bg-[#1e3a5f] text-[#0ea5e9]',
-  CANCEL: 'bg-[#3d1515] text-[#f87171]',
-  RETURN: 'bg-[#3d2200] text-[#f59e0b]',
-  ACCEPT: 'bg-[#3d2c00] text-[#f59e0b]',
-  DEPARTURE: 'bg-[#0a3040] text-[#22d3ee]',
+  CANCEL: 'bg-[#1e293b] text-[#f87171]',
+  RETURN: 'bg-[#1e293b] text-[#f59e0b]',
+  ACCEPT: 'bg-[#1e293b] text-[#f59e0b]',
+  DEPARTURE: 'bg-[#1e293b] text-[#22d3ee]',
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -66,7 +66,7 @@ export default function OrdersTable({ orders }: { orders: Order[] }) {
             <td className="px-3 py-2.5 text-xs font-medium">
               ₩{o.amount.toLocaleString()}
               {o.couponDiscount && (
-                <div className="text-[11px] text-red-400 font-normal">-₩{o.couponDiscount.toLocaleString()}</div>
+                <div className="text-[11px] text-[#f87171] font-normal">-₩{o.couponDiscount.toLocaleString()}</div>
               )}
             </td>
             <td className="px-3 py-2.5 text-xs text-[#94a3b8]">{o.date}</td>
