@@ -19,14 +19,14 @@ export default function DowHeatmap({ data }: Props) {
             <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10">
               <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg px-2.5 py-1.5 text-[11px] whitespace-nowrap">
                 <div className="text-white font-semibold">₩{d.amount.toLocaleString()}</div>
-                <div className="text-[#6b7280]">{d.orders} заказов</div>
+                <div className="text-[#94a3b8]">{d.orders} заказов</div>
               </div>
             </div>
             <div
               className={`w-full rounded-t-md transition-all ${isTop ? 'bg-[#0ea5e9]' : 'bg-[#0ea5e9]/30'}`}
               style={{ height: `${h}px` }}
             />
-            <span className="text-[10px] text-[#6b7280]">{d.day}</span>
+            <span className="text-[10px] text-[#94a3b8]">{d.day}</span>
           </div>
         )
       })}

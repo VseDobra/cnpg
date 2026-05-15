@@ -12,8 +12,8 @@ export default function InventoryBar({ productName, quantity, imageUrl, salesLas
 
   const isCritical = daysLeft != null ? daysLeft < 7 : quantity <= 5
   const isLow = daysLeft != null ? daysLeft < 14 : quantity <= 10
-  const color = isCritical ? 'bg-red-500' : isLow ? 'bg-amber-400' : 'bg-emerald-400'
-  const textColor = isCritical ? 'text-red-400' : isLow ? 'text-amber-400' : 'text-[#64748b]'
+  const color = isCritical ? 'bg-[#f87171]' : isLow ? 'bg-[#f59e0b]' : 'bg-[#0ea5e9]'
+  const textColor = isCritical ? 'text-[#f87171]' : isLow ? 'text-[#f59e0b]' : 'text-[#475569]'
   const pct = Math.min((quantity / maxQuantity) * 100, 100)
 
   return (
@@ -42,7 +42,7 @@ export default function InventoryBar({ productName, quantity, imageUrl, salesLas
           <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
         </div>
         {salesLast30Days != null && (
-          <div className="text-[10px] text-[#334155]">
+          <div className="text-[10px] text-[#475569]">
             {salesLast30Days} шт. за 30 дней
             {dailySales != null && dailySales > 0 && ` · ${dailySales.toFixed(1)}/день`}
           </div>
