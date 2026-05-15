@@ -2,7 +2,7 @@
 import { useRouter } from 'next/navigation'
 
 const STATUS_STYLES: Record<string, string> = {
-  DELIVERED: 'bg-[#0f172a] text-[#34d399]',
+  DELIVERED: 'bg-[#1e293b] text-[#34d399]',
   INSTRUCT: 'bg-[#1e3a5f] text-[#0ea5e9]',
   WAITING_DELIVER: 'bg-[#1e3a5f] text-[#0ea5e9]',
   WAIT_DELIVERY: 'bg-[#1e3a5f] text-[#0ea5e9]',
@@ -71,7 +71,7 @@ export default function OrdersTable({ orders }: { orders: Order[] }) {
             </td>
             <td className="px-3 py-2.5 text-xs text-[#94a3b8]">{o.date}</td>
             <td className="px-3 py-2.5">
-              <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_STYLES[o.status] ?? 'bg-[#1e293b] text-gray-400'}`}>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_STYLES[o.status] ?? 'bg-[#1e293b] text-[#94a3b8]'}`}>
                 {STATUS_LABELS[o.status] ?? o.status}
               </span>
             </td>
