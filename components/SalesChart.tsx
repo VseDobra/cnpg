@@ -12,8 +12,8 @@ export default function SalesChart({ data, showProfit }: Props) {
   return (
     <ResponsiveContainer width="100%" height={300}>
       <ComposedChart data={formatted} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-        <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} dy={6} />
-        <YAxis tick={{ fontSize: 12, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={60} tickFormatter={v => `₩${(v/1000).toFixed(0)}k`} />
+        <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} dy={6} />
+        <YAxis tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={60} tickFormatter={v => `₩${(v/1000).toFixed(0)}k`} />
         <Tooltip
           contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 10, fontSize: 13 }}
           labelStyle={{ color: '#e2e8f0', marginBottom: 4 }}
@@ -26,7 +26,7 @@ export default function SalesChart({ data, showProfit }: Props) {
         {showProfit && (
           <Legend
             formatter={(value) => value === 'amount' ? 'Продажи' : 'Прибыль'}
-            wrapperStyle={{ fontSize: 12, color: '#9ca3af', paddingTop: 8 }}
+            wrapperStyle={{ fontSize: 12, color: '#94a3b8', paddingTop: 8 }}
           />
         )}
         <Bar dataKey="amount" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
