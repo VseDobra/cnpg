@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Эстетики дашборда</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Bebas+Neue&family=Syne:wght@700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #080808; font-family: sans-serif; padding: 40px 32px; min-height: 100vh; }
+h1 { color: #fff; font-family: 'Syne', sans-serif; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 36px; opacity: 0.35; }
+
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+.card-wrap { display: flex; flex-direction: column; gap: 14px; }
+.opt-title { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 800; color: #fff; }
+.opt-desc { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: rgba(255,255,255,0.3); line-height: 1.7; }
+
+/* ======== A: AMBER TERMINAL ======== */
+.card-a { background: #0c0900; border: 1px solid #251900; border-radius: 3px; overflow: hidden; position: relative; }
+.card-a::after { content:''; position:absolute; inset:0; background: repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(245,158,11,0.015) 3px,rgba(245,158,11,0.015) 4px); pointer-events:none; }
+.a-top { background: #160f00; border-bottom: 1px solid #2e1f00; padding: 9px 14px; display:flex; align-items:center; gap:10px; }
+.a-logo { color:#f59e0b; font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:600; letter-spacing:3px; }
+.a-status { margin-left:auto; display:flex; align-items:center; gap:5px; }
+.a-dot { width:5px; height:5px; border-radius:50%; background:#f59e0b; box-shadow:0 0 6px #f59e0b; animation: blink 1.4s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+.a-time { color:#6b4400; font-family:'IBM Plex Mono',monospace; font-size:9px; }
+.a-body { display:grid; grid-template-columns:130px 1fr; height:270px; }
+.a-side { border-right:1px solid #2e1f00; padding:8px 0; }
+.a-nav { padding:6px 12px; font-family:'IBM Plex Mono',monospace; font-size:9px; color:#5c3a00; letter-spacing:1px; display:flex; align-items:center; gap:7px; }
+.a-nav.on { color:#f59e0b; background:#160f00; border-left:2px solid #f59e0b; padding-left:10px; }
+.a-nav span { opacity:0.6; }
+.a-main { padding:12px; display:flex; flex-direction:column; gap:8px; }
+.a-kpi4 { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.a-kpi { background:#160f00; border:1px solid #2e1f00; padding:9px 10px; }
+.a-kl { font-family:'IBM Plex Mono',monospace; font-size:7px; color:#6b4400; letter-spacing:1px; margin-bottom:3px; }
+.a-kv { font-family:'IBM Plex Mono',monospace; font-size:17px; font-weight:600; color:#f59e0b; line-height:1; }
+.a-kc { font-family:'IBM Plex Mono',monospace; font-size:8px; margin-top:2px; }
+.a-kc.up { color:#4ade80; } .a-kc.dn { color:#f87171; }
+.a-chart { background:#160f00; border:1px solid #2e1f00; padding:8px; flex:1; }
+.a-cl { font-family:'IBM Plex Mono',monospace; font-size:7px; color:#4a2c00; letter-spacing:1px; margin-bottom:6px; }
+.a-bars { display:flex; align-items:flex-end; gap:2px; height:44px; }
+.a-bar { flex:1; background:#f59e0b; border-radius:1px 1px 0 0; opacity:0.75; transition:opacity .2s; }
+.a-bar:hover { opacity:1; }
+.a-bar.pk { opacity:1; box-shadow:0 0 8px rgba(245,158,11,0.5); }
+
+/* ======== B: BRUTAL LIGHT ======== */
+.card-b { background:#ede8df; border:2.5px solid #000; overflow:hidden; }
+.b-top { background:#000; padding:9px 14px; display:flex; align-items:center; }
+.b-logo { color:#fff; font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:3px; }
+.b-tag { margin-left:auto; background:#ffe600; color:#000; font-family:'JetBrains Mono',monospace; font-size:8px; font-weight:700; padding:2px 6px; letter-spacing:1px; text-transform:uppercase; }
+.b-body { display:grid; grid-template-columns:110px 1fr; height:270px; }
+.b-side { border-right:2.5px solid #000; }
+.b-nav { padding:8px 12px; font-family:'JetBrains Mono',monospace; font-size:8px; color:#888; border-bottom:1px solid #ccc; text-transform:uppercase; letter-spacing:0.5px; }
+.b-nav.on { color:#000; background:#ffe600; border-bottom:1px solid #000; font-weight:700; border-left:3px solid #000; }
+.b-main { padding:12px; background:#ede8df; display:flex; flex-direction:column; gap:7px; }
+.b-row1 { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+.b-kpi { border:2.5px solid #000; padding:10px; background:#ffe600; }
+.b-kl { font-family:'JetBrains Mono',monospace; font-size:7px; color:#555; text-transform:uppercase; letter-spacing:1px; margin-bottom:1px; }
+.b-kv { font-family:'Bebas Neue',sans-serif; font-size:30px; color:#000; line-height:1; }
+.b-kc { font-family:'JetBrains Mono',monospace; font-size:8px; font-weight:700; color:#000; }
+.b-row2 { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+.b-sec { border:1.5px solid #000; padding:7px; background:#fff; }
+.b-sl { font-family:'JetBrains Mono',monospace; font-size:7px; color:#888; text-transform:uppercase; margin-bottom:1px; }
+.b-sv { font-family:'Bebas Neue',sans-serif; font-size:19px; color:#000; }
+.b-chart { border:2.5px solid #000; padding:8px; background:#fff; flex:1; }
+.b-cl { font-family:'JetBrains Mono',monospace; font-size:7px; color:#888; text-transform:uppercase; letter-spacing:1px; margin-bottom:5px; }
+.b-bars { display:flex; align-items:flex-end; gap:2px; height:38px; }
+.b-bar { flex:1; background:#000; }
+.b-bar.hl { background:#ffe600; outline:1.5px solid #000; }
+
+/* ======== C: AURORA GLASS ======== */
+.card-c { background:#06030f; border:1px solid rgba(255,255,255,0.07); border-radius:14px; overflow:hidden; position:relative; }
+.c-mesh { position:absolute; inset:0; background:
+  radial-gradient(ellipse 120px 100px at 20% 20%, rgba(139,92,246,0.25) 0%, transparent 60%),
+  radial-gradient(ellipse 100px 80px at 80% 70%, rgba(236,72,153,0.18) 0%, transparent 60%),
+  radial-gradient(ellipse 80px 60px at 60% 10%, rgba(6,182,212,0.12) 0%, transparent 60%);
+  pointer-events:none; }
+.c-inner { position:relative; z-index:1; height:100%; display:flex; flex-direction:column; }
+.c-top { padding:10px 14px; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; align-items:center; background:rgba(255,255,255,0.03); backdrop-filter:blur(20px); }
+.c-logo { color:#fff; font-family:'Syne',sans-serif; font-size:14px; font-weight:800; letter-spacing:-0.5px; }
+.c-pill { margin-left:8px; background:linear-gradient(90deg,#7c3aed,#db2777); border-radius:20px; padding:1px 7px; font-family:'Syne',sans-serif; font-size:7px; color:#fff; font-weight:700; letter-spacing:1px; text-transform:uppercase; }
+.c-sync { margin-left:auto; font-family:'Syne',sans-serif; font-size:8px; color:rgba(255,255,255,0.25); }
+.c-body { display:grid; grid-template-columns:125px 1fr; flex:1; }
+.c-side { border-right:1px solid rgba(255,255,255,0.06); padding:10px 0; background:rgba(0,0,0,0.15); }
+.c-nav { padding:7px 13px; font-family:'Syne',sans-serif; font-size:9px; color:rgba(255,255,255,0.28); display:flex; align-items:center; gap:8px; letter-spacing:0.3px; }
+.c-nav.on { color:#fff; background:linear-gradient(90deg,rgba(139,92,246,0.18),transparent); border-left:2px solid #a78bfa; font-weight:700; }
+.c-ic { width:10px; height:10px; border-radius:3px; background:currentColor; opacity:0.4; flex-shrink:0; }
+.c-nav.on .c-ic { background:linear-gradient(135deg,#a78bfa,#ec4899); opacity:1; }
+.c-main { padding:12px; display:flex; flex-direction:column; gap:7px; }
+.c-row1 { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+.c-kpi { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:8px; padding:10px; backdrop-filter:blur(8px); }
+.c-kpi.ft { background:linear-gradient(135deg,rgba(124,58,237,0.18),rgba(219,39,119,0.1)); border:1px solid rgba(167,139,250,0.22); position:relative; overflow:hidden; }
+.c-kpi.ft::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,#7c3aed,#ec4899); }
+.c-kl { font-family:'Syne',sans-serif; font-size:7px; color:rgba(255,255,255,0.3); text-transform:uppercase; letter-spacing:1.5px; margin-bottom:3px; }
+.c-kv { font-family:'Syne',sans-serif; font-size:22px; font-weight:800; color:#fff; line-height:1; }
+.c-kc { font-family:'Syne',sans-serif; font-size:8px; color:#a78bfa; margin-top:3px; }
+.c-kc.dn { color:#f87171; }
+.c-row2 { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+.c-sec { background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:8px; }
+.c-sl { font-family:'Syne',sans-serif; font-size:7px; color:rgba(255,255,255,0.22); text-transform:uppercase; letter-spacing:1px; margin-bottom:2px; }
+.c-sv { font-family:'Syne',sans-serif; font-size:14px; font-weight:700; color:rgba(255,255,255,0.85); }
+.c-chart { background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:7px; padding:9px; flex:1; }
+.c-cl { font-family:'Syne',sans-serif; font-size:7px; color:rgba(255,255,255,0.22); text-transform:uppercase; letter-spacing:1px; margin-bottom:6px; }
+.c-bars { display:flex; align-items:flex-end; gap:2px; height:36px; }
+.c-bar { flex:1; background:rgba(139,92,246,0.5); border-radius:2px 2px 0 0; }
+.c-bar.hl { background:linear-gradient(0deg,#7c3aed,#ec4899); opacity:1; box-shadow:0 0 10px rgba(167,139,250,0.4); }
+</style>
+</head>
+<body>
+<h1>Три эстетики — выбери одну</h1>
+<div class="grid">
+
+  <!-- A -->
+  <div class="card-wrap">
+    <div class="opt-title">A — Amber Terminal</div>
+    <div class="card-a">
+      <div class="a-top">
+        <span class="a-logo">COUPANG</span>
+        <div class="a-status"><div class="a-dot"></div><span class="a-time">14:32 KST</span></div>
+      </div>
+      <div class="a-body">
+        <div class="a-side">
+          <div class="a-nav on"><span>►</span> ДАШБОРД</div>
+          <div class="a-nav"><span>·</span> ЗАКАЗЫ</div>
+          <div class="a-nav"><span>·</span> ТОВАРЫ</div>
+          <div class="a-nav"><span>·</span> ФОТО</div>
+          <div class="a-nav"><span>·</span> СКЛАД</div>
+          <div class="a-nav"><span>·</span> ФИНАНСЫ</div>
+          <div class="a-nav"><span>·</span> ВОЗВРАТЫ</div>
+          <div class="a-nav"><span>·</span> КУПОНЫ</div>
+          <div class="a-nav"><span>·</span> НАСТРОЙКИ</div>
+        </div>
+        <div class="a-main">
+          <div class="a-kpi4">
+            <div class="a-kpi">
+              <div class="a-kl">ПРОДАЖИ 30Д</div>
+              <div class="a-kv">₩1.24M</div>
+              <div class="a-kc up">▲ +12.4%</div>
+            </div>
+            <div class="a-kpi">
+              <div class="a-kl">ЗАКАЗЫ 30Д</div>
+              <div class="a-kv">84</div>
+              <div class="a-kc up">▲ +5.2%</div>
+            </div>
+            <div class="a-kpi">
+              <div class="a-kl">СР. ЧЕК</div>
+              <div class="a-kv">₩14.7K</div>
+              <div class="a-kc dn">▼ −2.1%</div>
+            </div>
+            <div class="a-kpi">
+              <div class="a-kl">ПРИБЫЛЬ</div>
+              <div class="a-kv">₩340K</div>
+              <div class="a-kc up">▲ +8.9%</div>
+            </div>
+          </div>
+          <div class="a-chart">
+            <div class="a-cl">ДИНАМИКА ─────────────────────</div>
+            <div class="a-bars">
+              <div class="a-bar" style="height:50%"></div>
+              <div class="a-bar" style="height:38%"></div>
+              <div class="a-bar" style="height:65%"></div>
+              <div class="a-bar" style="height:42%"></div>
+              <div class="a-bar pk" style="height:88%"></div>
+              <div class="a-bar" style="height:60%"></div>
+              <div class="a-bar" style="height:75%"></div>
+              <div class="a-bar" style="height:52%"></div>
+              <div class="a-bar pk" style="height:100%"></div>
+              <div class="a-bar" style="height:70%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="opt-desc">IBM Plex Mono + тёплый amber.<br>Тёмный, плотный, терминальный.<br>Как Bloomberg — только для данных.</div>
+  </div>
+
+  <!-- B -->
+  <div class="card-wrap">
+    <div class="opt-title">B — Brutal Light</div>
+    <div class="card-b">
+      <div class="b-top">
+        <span class="b-logo">Coupang</span>
+        <span class="b-tag">Analytics</span>
+      </div>
+      <div class="b-body">
+        <div class="b-side">
+          <div class="b-nav on">Дашборд</div>
+          <div class="b-nav">Заказы</div>
+          <div class="b-nav">Товары</div>
+          <div class="b-nav">Фото</div>
+          <div class="b-nav">Склад</div>
+          <div class="b-nav">Финансы</div>
+          <div class="b-nav">Возвраты</div>
+          <div class="b-nav">Купоны</div>
+          <div class="b-nav">Настройки</div>
+        </div>
+        <div class="b-main">
+          <div class="b-row1">
+            <div class="b-kpi">
+              <div class="b-kl">Продажи</div>
+              <div class="b-kv">₩1.24M</div>
+              <div class="b-kc">↑ 12%</div>
+            </div>
+            <div class="b-kpi">
+              <div class="b-kl">Заказы</div>
+              <div class="b-kv">84</div>
+              <div class="b-kc">↑ 5%</div>
+            </div>
+          </div>
+          <div class="b-row2">
+            <div class="b-sec"><div class="b-sl">Ср. чек</div><div class="b-sv">₩14.7K</div></div>
+            <div class="b-sec"><div class="b-sl">Возвраты</div><div class="b-sv">3 шт</div></div>
+            <div class="b-sec"><div class="b-sl">Прибыль</div><div class="b-sv">₩340K</div></div>
+          </div>
+          <div class="b-chart">
+            <div class="b-cl">Продажи по дням</div>
+            <div class="b-bars">
+              <div class="b-bar" style="height:50%"></div>
+              <div class="b-bar" style="height:38%"></div>
+              <div class="b-bar" style="height:65%"></div>
+              <div class="b-bar" style="height:42%"></div>
+              <div class="b-bar hl" style="height:88%"></div>
+              <div class="b-bar" style="height:60%"></div>
+              <div class="b-bar" style="height:75%"></div>
+              <div class="b-bar" style="height:52%"></div>
+              <div class="b-bar hl" style="height:100%"></div>
+              <div class="b-bar" style="height:70%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="opt-desc">Bebas Neue + JetBrains Mono.<br>Белый фон, чёрные рамки, жёлтый акцент.<br>Газета / зин / брутализм.</div>
+  </div>
+
+  <!-- C -->
+  <div class="card-wrap">
+    <div class="opt-title">C — Aurora Glass</div>
+    <div class="card-c">
+      <div class="c-mesh"></div>
+      <div class="c-inner">
+        <div class="c-top">
+          <span class="c-logo">Coupang</span>
+          <span class="c-pill">Analytics</span>
+          <span class="c-sync">● синк</span>
+        </div>
+        <div class="c-body">
+          <div class="c-side">
+            <div class="c-nav on"><div class="c-ic"></div>Дашборд</div>
+            <div class="c-nav"><div class="c-ic"></div>Заказы</div>
+            <div class="c-nav"><div class="c-ic"></div>Товары</div>
+            <div class="c-nav"><div class="c-ic"></div>Фото</div>
+            <div class="c-nav"><div class="c-ic"></div>Склад</div>
+            <div class="c-nav"><div class="c-ic"></div>Финансы</div>
+            <div class="c-nav"><div class="c-ic"></div>Возвраты</div>
+            <div class="c-nav"><div class="c-ic"></div>Купоны</div>
+            <div class="c-nav"><div class="c-ic"></div>Настройки</div>
+          </div>
+          <div class="c-main">
+            <div class="c-row1">
+              <div class="c-kpi ft">
+                <div class="c-kl">Продажи</div>
+                <div class="c-kv">₩1.24M</div>
+                <div class="c-kc">↑ 12.4%</div>
+              </div>
+              <div class="c-kpi ft">
+                <div class="c-kl">Заказы</div>
+                <div class="c-kv">84</div>
+                <div class="c-kc">↑ 5.2%</div>
+              </div>
+            </div>
+            <div class="c-row2">
+              <div class="c-sec"><div class="c-sl">Ср. чек</div><div class="c-sv">₩14.7K</div></div>
+              <div class="c-sec"><div class="c-sl">Возвраты</div><div class="c-sv">3 шт</div></div>
+              <div class="c-sec"><div class="c-sl">Прибыль</div><div class="c-sv">₩340K</div></div>
+            </div>
+            <div class="c-chart">
+              <div class="c-cl">Динамика продаж</div>
+              <div class="c-bars">
+                <div class="c-bar" style="height:50%"></div>
+                <div class="c-bar" style="height:38%"></div>
+                <div class="c-bar" style="height:65%"></div>
+                <div class="c-bar" style="height:42%"></div>
+                <div class="c-bar hl" style="height:88%"></div>
+                <div class="c-bar" style="height:60%"></div>
+                <div class="c-bar" style="height:75%"></div>
+                <div class="c-bar" style="height:52%"></div>
+                <div class="c-bar hl" style="height:100%"></div>
+                <div class="c-bar" style="height:70%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="opt-desc">Syne 800 + фиолетово-розовый.<br>Тёмный, mesh-градиент, стекло.<br>Премиум, драматичный, запоминающийся.</div>
+  </div>
+
+</div>
+</body>
+</html>

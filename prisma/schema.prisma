@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Order {
+  id              String      @id
+  status          String
+  orderedAt       DateTime
+  shipByDate      DateTime?
+  totalPrice      Int
+  receiverName    String
+  receiverAddress String
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  items           OrderItem[]
+}
+
+model OrderItem {
+  id          String @id @default(cuid())
+  orderId     String
+  productId   String
+  productName String
+  quantity    Int
+  unitPrice   Int
+  order       Order  @relation(fields: [orderId], references: [id])
+}
+
+model Product {
+  id        String   @id
+  name      String
+  status    String
+  salePrice Int
+  costPrice      Int      @default(0)
+  couponDiscount Int      @default(0)
+  commission     Float    @default(10.8)
+  adRate         Float    @default(5.0)
+  taxRate        Float    @default(10.0)
+  rgDelivery     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  imageUrl  String?
+  naverCategoryId String?
+}
+
+model PriceHistory {
+  id        String   @id @default(cuid())
+  productId String
+  price     Int
+  recordedAt DateTime @default(now())
+}
+
+model Inventory {
+  id              String   @id @default(cuid())
+  productId       String   @unique
+  vendorItemId    String
+  quantity        Int
+  salesLast30Days Int      @default(0)
+  updatedAt       DateTime @updatedAt
+}
+
+model Settlement {
+  id         String   @id
+  settledAt  DateTime
+  amount     Int
+  commission Int
+  netAmount  Int
+  createdAt  DateTime @default(now())
+}
+
+model Return {
+  id          String   @id
+  orderId     String
+  reason      String
+  status      String
+  requestedAt DateTime
+  createdAt   DateTime @default(now())
+}
+
+model SyncLog {
+  id       String   @id @default(cuid())
+  type     String
+  status   String
+  message  String?
+  syncedAt DateTime @default(now())
+}
