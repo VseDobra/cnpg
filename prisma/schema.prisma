@@ -87,3 +87,15 @@ model SyncLog {
   message  String?
   syncedAt DateTime @default(now())
 }
+
+model NicheOpportunity {
+  id          Int      @id @default(autoincrement())
+  keyword     String
+  volume      Int
+  competition String
+  verdict     String
+  trendChange Int?
+  medianPrice Int?
+  topKeywords String
+  scannedAt   DateTime @default(now())
+}

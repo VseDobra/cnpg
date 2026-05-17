@@ -25,6 +25,44 @@ export interface KeywordVolume {
   monthlyTotalQcCnt: number | '< 10'
 }
 
+export interface RelatedKeyword {
+  relKeyword: string
+  monthlyPcQcCnt: number | '< 10'
+  monthlyMobileQcCnt: number | '< 10'
+  compIdx: string
+  plAvgDepth: number
+}
+
+export function getVolume(k: RelatedKeyword): number {
+  if (k.monthlyPcQcCnt === '< 10' || k.monthlyMobileQcCnt === '< 10') return 0
+  return Number(k.monthlyPcQcCnt) + Number(k.monthlyMobileQcCnt)
+}
+
+export async function fetchRelatedKeywords(seed: string): Promise<RelatedKeyword[]> {
+  const path = '/keywordstool'
+  const qs = `hintKeywords=${encodeURIComponent(seed)}&showDetail=1`
+  const res = await fetch(`${BASE}${path}?${qs}`, {
+    headers: adHeaders('GET', path),
+  })
+  if (!res.ok) return []
+  const data = await res.json()
+  const list: Array<{
+    relKeyword: string
+    monthlyPcQcCnt: number | string
+    monthlyMobileQcCnt: number | string
+    compIdx: string
+    plAvgDepth: number
+  }> = data.keywordList ?? []
+
+  return list.map(item => ({
+    relKeyword: item.relKeyword,
+    monthlyPcQcCnt: item.monthlyPcQcCnt === '< 10' ? '< 10' : Number(item.monthlyPcQcCnt),
+    monthlyMobileQcCnt: item.monthlyMobileQcCnt === '< 10' ? '< 10' : Number(item.monthlyMobileQcCnt),
+    compIdx: item.compIdx ?? '높음',
+    plAvgDepth: item.plAvgDepth ?? 0,
+  }))
+}
+
 export async function fetchKeywordVolumes(keywords: string[]): Promise<KeywordVolume[]> {
   const path = '/keywordstool'
   const normalized = keywords.map(k => k.replace(/\s+/g, ''))

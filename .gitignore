@@ -55,3 +55,6 @@ prisma/*.db-shm
 response.txt
 .superpowers/
 .playwright-mcp/
+
+# Agent
+agent/node_modules/
