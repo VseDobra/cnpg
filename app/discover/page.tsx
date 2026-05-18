@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -12,6 +13,23 @@ interface Opportunity {
   trendChange: number | null
   medianPrice: number | null
   topKeywords: string
+}
+
+interface HistoryItem {
+  id: number
+  keyword: string
+  volume: number
+  competition: string
+  verdict: string
+  verdictReason: string
+  trendChange: number | null
+  medianPrice: number | null
+  minPrice: number | null
+  maxPrice: number | null
+  topKeywords: string
+  competitors: string
+  risks: string
+  searchedAt: string
 }
 
 interface ResearchResult {
@@ -88,6 +106,7 @@ export default function DiscoverPage() {
   const [lastScan, setLastScan] = useState<string | null>(null)
   const [loadingOpps, setLoadingOpps] = useState(true)
   const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
 
   const [keyword, setKeyword] = useState('')
   const [researching, setResearching] = useState(false)
@@ -97,7 +116,25 @@ export default function DiscoverPage() {
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [matchingImage, setMatchingImage] = useState(false)
+
+  type RawSeries = { title: string; data: { period: string; ratio: number }[] }
+  const [trendAvgNaver, setTrendAvgNaver] = useState<RawSeries | null>(null)
+  const [trendAvgGoogle, setTrendAvgGoogle] = useState<RawSeries | null>(null)
+  const [trendAvgLoading, setTrendAvgLoading] = useState(false)
+  const [trendAvgDone, setTrendAvgDone] = useState(false)
+  const [googleChartData, setGoogleChartData] = useState<{ period: string; ratio: number }[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const [history, setHistory] = useState<HistoryItem[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(true)
+  const [expandedHistory, setExpandedHistory] = useState<number | null>(null)
+
+  function loadHistory() {
+    fetch('/api/discover/history')
+      .then(r => r.json())
+      .then(d => setHistory(d.history ?? []))
+      .finally(() => setLoadingHistory(false))
+  }
 
   useEffect(() => {
     fetch('/api/discover')
@@ -107,18 +144,23 @@ export default function DiscoverPage() {
         setLastScan(data.lastScan ?? null)
       })
       .finally(() => setLoadingOpps(false))
+    loadHistory()
   }, [])
 
   async function handleScan() {
     setScanning(true)
+    setScanError(null)
     try {
       const res = await fetch('/api/discover/scan', { method: 'POST' })
       const data = await res.json()
+      if (data.error) throw new Error(data.error)
       if (data.ok) {
         const fresh = await fetch('/api/discover').then(r => r.json())
         setOpportunities(fresh.results ?? [])
         setLastScan(fresh.lastScan ?? null)
       }
+    } catch (e) {
+      setScanError(e instanceof Error ? e.message : 'Ошибка при сканировании')
     } finally {
       setScanning(false)
     }
@@ -129,6 +171,10 @@ export default function DiscoverPage() {
     setResearching(true)
     setResult(null)
     setResearchError(null)
+    setTrendAvgNaver(null)
+    setTrendAvgGoogle(null)
+    setGoogleChartData([])
+    setTrendAvgDone(false)
     try {
       const res = await fetch('/api/discover', {
         method: 'POST',
@@ -138,6 +184,32 @@ export default function DiscoverPage() {
       const data = await res.json()
       if (data.error) throw new Error(data.error)
       setResult(data)
+
+      // fetch 12M trend averages in background
+      const kw = keyword.trim()
+      const end = new Date()
+      const start = new Date(end.getTime() - 365 * 24 * 60 * 60 * 1000)
+      const fmt = (d: Date) => d.toISOString().slice(0, 10)
+      setTrendAvgLoading(true)
+      Promise.all([
+        fetch('/api/trends/keywords', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ startDate: fmt(start), endDate: fmt(end), timeUnit: 'month', keyword: [{ name: kw, param: [kw] }] }),
+        }).then(r => r.json()).then(d => (d.results?.[0] as RawSeries | undefined) ?? null).catch(() => null),
+        fetch('/api/trends/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keywords: [kw], startDate: fmt(start), endDate: fmt(end) }),
+        }).then(r => r.json()).then(d => (d.results?.[0] as RawSeries | undefined) ?? null).catch(() => null),
+      ]).then(([naver, google]) => {
+        setTrendAvgNaver(naver)
+        setTrendAvgGoogle(google)
+        setGoogleChartData(google?.data ?? [])
+        setTrendAvgDone(true)
+      }).finally(() => setTrendAvgLoading(false))
+
+      loadHistory()
 
       if (imageFile) {
         setMatchingImage(true)
@@ -156,6 +228,16 @@ export default function DiscoverPage() {
     } finally {
       setResearching(false)
     }
+  }
+
+  async function deleteHistory(id: number) {
+    await fetch('/api/discover/history', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+    setHistory(prev => prev.filter(h => h.id !== id))
+    if (expandedHistory === id) setExpandedHistory(null)
   }
 
   function fileToBase64(file: File): Promise<string> {
@@ -195,6 +277,10 @@ export default function DiscoverPage() {
           {scanning ? 'Сканирование...' : 'Обновить сейчас'}
         </button>
       </div>
+
+      {scanError && (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-5 py-3 text-red-400 text-sm mb-4">{scanError}</div>
+      )}
 
       {/* Auto-discovered results */}
       <div className="mb-8">
@@ -238,7 +324,7 @@ export default function DiscoverPage() {
                   </div>
                   {topKws.length > 0 && (
                     <div className="flex flex-wrap gap-1">
-                      {topKws.slice(0, 3).map(k => (
+                      {topKws.map(k => (
                         <span key={k.keyword} className="text-[10px] px-1.5 py-0.5 bg-[#12141f] border border-[#2d3148] rounded text-[#6b7280]">{k.keyword}</span>
                       ))}
                     </div>
@@ -249,6 +335,108 @@ export default function DiscoverPage() {
           </div>
         )}
       </div>
+
+      {/* Search history */}
+      {(loadingHistory || history.length > 0) && (
+        <div className="mb-8">
+          <h2 className="text-xs font-semibold text-[#6b7280] uppercase tracking-wider mb-3">История поисков</h2>
+          {loadingHistory ? (
+            <div className="space-y-2">
+              {[...Array(3)].map((_, i) => <div key={i} className="h-12 rounded-xl bg-[#1a1d2e] border border-[#2d3148] animate-pulse" />)}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {history.map(h => {
+                const b = verdictBadge(h.verdict)
+                const trend = trendLabel(h.trendChange)
+                const isOpen = expandedHistory === h.id
+                const topKws: Array<{ keyword: string; volume: number; competition: string }> = JSON.parse(h.topKeywords || '[]')
+                const competitors: Array<{ title: string; price: number; mall: string }> = JSON.parse(h.competitors || '[]')
+                const risks: string[] = JSON.parse(h.risks || '[]')
+                return (
+                  <div key={h.id} className="bg-[#1a1d2e] border border-[#2d3148] rounded-xl overflow-hidden">
+                    {/* Row */}
+                    <div
+                      className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-[#12141f] transition-colors"
+                      onClick={() => setExpandedHistory(isOpen ? null : h.id)}
+                    >
+                      <span className="text-sm font-medium text-white flex-1">{h.keyword}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full border flex-shrink-0 ${b.cls}`}>{b.label}</span>
+                      <span className="text-xs text-[#4b5563]">{h.volume.toLocaleString('ru-RU')}/мес</span>
+                      {trend && <span className={`text-xs ${trend.cls}`}>{trend.text}</span>}
+                      <span className="text-[10px] text-[#4b5563]">
+                        {new Date(h.searchedAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      <button
+                        onClick={e => { e.stopPropagation(); deleteHistory(h.id) }}
+                        className="text-[#4b5563] hover:text-red-400 transition-colors text-base leading-none ml-1"
+                        title="Удалить"
+                      >×</button>
+                      <span className="text-[#4b5563] text-xs">{isOpen ? '▲' : '▼'}</span>
+                    </div>
+
+                    {/* Expanded detail */}
+                    {isOpen && (
+                      <div className="px-4 pb-4 border-t border-[#2d3148] pt-3 space-y-3">
+                        <p className="text-xs text-[#9ca3af]">{h.verdictReason}</p>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="bg-[#12141f] rounded-lg p-2.5 text-center">
+                            <div className="text-[10px] text-[#4b5563] mb-0.5">Конкуренция</div>
+                            <div className={`text-sm font-medium ${compColor(h.competition)}`}>{compLabel(h.competition)}</div>
+                          </div>
+                          {h.medianPrice && (
+                            <div className="bg-[#12141f] rounded-lg p-2.5 text-center">
+                              <div className="text-[10px] text-[#4b5563] mb-0.5">Медиана цен</div>
+                              <div className="text-sm font-medium">{h.medianPrice.toLocaleString('ru-RU')}₩</div>
+                            </div>
+                          )}
+                          {h.minPrice && h.maxPrice && (
+                            <div className="bg-[#12141f] rounded-lg p-2.5 text-center">
+                              <div className="text-[10px] text-[#4b5563] mb-0.5">Разброс цен</div>
+                              <div className="text-xs font-medium">{h.minPrice.toLocaleString('ru-RU')} – {h.maxPrice.toLocaleString('ru-RU')}₩</div>
+                            </div>
+                          )}
+                        </div>
+                        {risks.length > 0 && (
+                          <div>
+                            <div className="text-[10px] text-[#4b5563] uppercase tracking-wider mb-1.5">Риски</div>
+                            <ul className="space-y-1">
+                              {risks.map((r, i) => <li key={i} className="text-xs text-[#9ca3af] flex gap-1.5"><span className="text-yellow-400">⚠️</span>{r}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                        {topKws.length > 0 && (
+                          <div>
+                            <div className="text-[10px] text-[#4b5563] uppercase tracking-wider mb-1.5">Ключи для листинга</div>
+                            <div className="flex flex-wrap gap-1">
+                              {topKws.slice(0, 15).map(k => (
+                                <span key={k.keyword} className="text-[10px] px-1.5 py-0.5 bg-[#12141f] border border-[#2d3148] rounded text-[#6b7280]">{k.keyword}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {competitors.length > 0 && (
+                          <div>
+                            <div className="text-[10px] text-[#4b5563] uppercase tracking-wider mb-1.5">Конкуренты</div>
+                            <div className="space-y-1">
+                              {competitors.map((c, i) => (
+                                <div key={i} className="flex justify-between gap-2 text-xs">
+                                  <span className="text-[#6b7280] truncate">{c.title}</span>
+                                  <span className="flex-shrink-0 text-[#9ca3af]">{c.price.toLocaleString('ru-RU')}₩</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Manual research */}
       <div>
@@ -411,6 +599,83 @@ export default function DiscoverPage() {
                 </ul>
               </div>
             )}
+
+            {/* Google Trends chart */}
+            {(trendAvgLoading || trendAvgDone) && (
+              <div className="bg-[#1a1d2e] border border-[#2d3148] rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-[11px] font-semibold text-[#6b7280] uppercase tracking-wider">Google Trends (Корея, 12 мес)</h3>
+                </div>
+                {trendAvgLoading && googleChartData.length === 0 ? (
+                  <div className="h-[120px] flex items-center justify-center">
+                    <div className="w-full space-y-2 px-2">
+                      {[80, 60, 90].map((w, i) => <div key={i} className="h-3 rounded bg-[#2d3148] animate-pulse" style={{ width: `${w}%` }} />)}
+                    </div>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={120}>
+                    <LineChart data={googleChartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                      <XAxis dataKey="period" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} dy={4}
+                        tickFormatter={v => v.slice(5)} interval="preserveStartEnd" />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} width={24} />
+                      <Tooltip
+                        contentStyle={{ background: '#12141f', border: '1px solid #2d3148', borderRadius: 8, fontSize: 11 }}
+                        labelStyle={{ color: '#e2e8f0' }}
+                        formatter={(v: number) => [v, 'Индекс']}
+                      />
+                      <Line type="monotone" dataKey="ratio" stroke="#6366f1" strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            )}
+
+            {/* Trend averages */}
+            {(trendAvgLoading || trendAvgDone) && (() => {
+              const STAT_PERIODS = [
+                { label: '1 мес', months: 1 },
+                { label: '3 мес', months: 3 },
+                { label: '6 мес', months: 6 },
+                { label: '9 мес', months: 9 },
+                { label: '1 год', months: 12 },
+              ]
+              function calcAvgs(series: RawSeries | null) {
+                if (!series) return STAT_PERIODS.map(p => ({ label: p.label, avg: null as number | null }))
+                const now = new Date()
+                return STAT_PERIODS.map(({ label, months }) => {
+                  const cutoff = new Date(now.getFullYear(), now.getMonth() - months + 1, 1).toISOString().slice(0, 7)
+                  const vals = series.data.filter(p => p.period >= cutoff).map(p => p.ratio).filter(v => v > 0)
+                  return { label, avg: vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null }
+                })
+              }
+              return (
+                <div className="bg-[#1a1d2e] border border-[#2d3148] rounded-xl p-4">
+                  <h3 className="text-[11px] font-semibold text-[#6b7280] uppercase tracking-wider mb-3">Средний индекс поиска</h3>
+                  {trendAvgLoading ? (
+                    <div className="space-y-2">
+                      <div className="h-8 rounded bg-[#2d3148] animate-pulse" />
+                      <div className="h-8 rounded bg-[#2d3148] animate-pulse" />
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {[{ label: 'Naver', avgs: calcAvgs(trendAvgNaver) }, { label: 'Google', avgs: calcAvgs(trendAvgGoogle) }].map(({ label, avgs }) => (
+                        <div key={label} className="grid grid-cols-[56px_1fr] gap-2 items-center">
+                          <span className="text-[10px] text-[#4b5563]">{label}</span>
+                          <div className="flex gap-2">
+                            {avgs.map(({ label: l, avg }) => (
+                              <div key={l} className="flex-1 bg-[#12141f] rounded-lg px-2 py-1.5 text-center">
+                                <div className="text-[10px] text-[#4b5563] mb-0.5">{l}</div>
+                                <div className="text-sm font-semibold text-[#e2e8f0]">{avg ?? '—'}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         )}
       </div>

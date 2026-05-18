@@ -99,3 +99,21 @@ model NicheOpportunity {
   topKeywords String
   scannedAt   DateTime @default(now())
 }
+
+model ResearchHistory {
+  id            Int      @id @default(autoincrement())
+  keyword       String
+  volume        Int
+  competition   String
+  verdict       String
+  verdictReason String
+  trendChange   Int?
+  trendMonths   String
+  medianPrice   Int?
+  minPrice      Int?
+  maxPrice      Int?
+  topKeywords   String
+  competitors   String
+  risks         String
+  searchedAt    DateTime @default(now())
+}

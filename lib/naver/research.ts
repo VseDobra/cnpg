@@ -6,17 +6,23 @@ import { fetchSearchTrends, type SearchTrendPoint } from './datalab'
 
 export const SEED_KEYWORDS = [
   // 수납/정리 (хранение)
-  '수납함', '정리함', '서랍정리', '옷걸이', '행거',
+  '수납함', '정리함', '서랍정리', '옷걸이', '행거', '수납박스', '정리대',
   // 캠핑 (кемпинг)
-  '캠핑의자', '캠핑테이블', '캠핑랜턴', '텐트팩', '캠핑매트',
+  '캠핑의자', '캠핑테이블', '캠핑랜턴', '텐트팩', '캠핑매트', '캠핑버너', '해먹',
   // 자동차용품 (автотовары)
-  '차량용방향제', '차량수납', '트렁크정리', '주차번호판', '차량청소',
+  '차량용방향제', '차량수납', '트렁크정리', '주차번호판', '차량청소', '차량용충전기',
   // 홈오피스 (домашний офис)
-  '모니터받침대', '키보드받침대', '케이블정리', '독서대', '마우스패드',
+  '모니터받침대', '키보드받침대', '케이블정리', '독서대', '마우스패드', '노트북거치대',
   // 스포츠 (спорт)
-  '요가매트', '폼롤러', '줄넘기', '아령', '운동밴드',
+  '요가매트', '폼롤러', '줄넘기', '아령', '운동밴드', '훌라후프', '짐볼',
   // 반려동물 (зоотовары)
-  '강아지장난감', '고양이장난감', '펫빗', '강아지옷', '고양이터널',
+  '강아지장난감', '고양이장난감', '펫빗', '강아지옷', '고양이터널', '강아지간식', '고양이간식',
+  // 주방/생활 (кухня/быт)
+  '주방수납', '냄비받침', '실리콘주걱', '에코백', '텀블러', '보온도시락',
+  // 뷰티/헬스 (красота/здоровье)
+  '두피케어', '마사지기', '안대', '족욕기', '핫팩',
+  // 시즌 (сезонные)
+  '선풍기', '제습제', '방향제', '가습기필터',
 ]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -106,10 +112,15 @@ export async function quickResearch(keyword: string): Promise<ResearchResult> {
   const { verdict, reason } = getVerdict(volume, competition, trends)
   const prices = analyzePrices(shoppingItems)
 
+  const seedChunks = [...Array(Math.max(0, keyword.length - 1))].map((_, i) => keyword.slice(i, i + 2))
   const topKeywords = relatedKws
-    .filter(k => getVolume(k) > 300 && k.compIdx !== '높음')
+    .filter(k =>
+      getVolume(k) > 300 &&
+      k.compIdx !== '높음' &&
+      seedChunks.some(chunk => k.relKeyword.includes(chunk))
+    )
     .sort((a, b) => getVolume(b) - getVolume(a))
-    .slice(0, 5)
+    .slice(0, 20)
     .map(k => ({ keyword: k.relKeyword, volume: getVolume(k), competition: k.compIdx }))
 
   return {
@@ -142,7 +153,7 @@ export async function runDailyScan(): Promise<void> {
     where: { scannedAt: { lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
   })
   const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  today.setUTCHours(0, 0, 0, 0)
   await prisma.nicheOpportunity.deleteMany({ where: { scannedAt: { gte: today } } })
 
   console.log(`[discover] Scanning ${SEED_KEYWORDS.length} keywords...`)

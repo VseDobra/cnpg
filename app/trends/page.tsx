@@ -74,7 +74,7 @@ function buildChartData(
 export default function TrendsPage() {
   const [products, setProducts] = useState<DbProduct[]>([])
   const [keywords, setKeywords] = useState<string[]>([])
-  const [categoryId, setCategoryId] = useState(DATALAB_CATEGORIES[1].id)
+  const [categoryId, setCategoryId] = useState(DATALAB_CATEGORIES[0].id)
   const [period, setPeriod] = useState(PERIODS[1])
   const [trendData, setTrendData] = useState<TrendPoint[]>([])
   const [trendLoading, setTrendLoading] = useState(false)
@@ -86,9 +86,41 @@ export default function TrendsPage() {
   const [loadingTags, setLoadingTags] = useState<Record<string, boolean>>({})
   const [missingCreds, setMissingCreds] = useState(false)
 
+  type RelatedKw = { keyword: string; volume: number; competition: string }
+  const [relatedMap, setRelatedMap] = useState<Record<string, RelatedKw[]>>({})
+  const [relatedLoading, setRelatedLoading] = useState(false)
+
+  const [googleData, setGoogleData] = useState<TrendPoint[]>([])
+  const [googleLoading, setGoogleLoading] = useState(false)
+  const [googleError, setGoogleError] = useState<string | null>(null)
+
+  // stats: raw 12M data for averages (full dates preserved)
+  type RawSeries = { title: string; data: { period: string; ratio: number }[] }
+  const [statsNaver, setStatsNaver] = useState<RawSeries[]>([])
+  const [statsGoogle, setStatsGoogle] = useState<RawSeries[]>([])
+  const [statsLoading, setStatsLoading] = useState(false)
+
   useEffect(() => {
     fetch('/api/products').then(r => r.json()).then(setProducts)
   }, [])
+
+  useEffect(() => {
+    if (keywords.length === 0) { setRelatedMap({}); return }
+    setRelatedLoading(true)
+    Promise.all(
+      keywords.map(kw =>
+        fetch('/api/trends/related', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keyword: kw }),
+        }).then(r => r.json()).then(d => ({ kw, results: d.results ?? [] })).catch(() => ({ kw, results: [] }))
+      )
+    ).then(all => {
+      const map: Record<string, RelatedKw[]> = {}
+      all.forEach(({ kw, results }) => { map[kw] = results })
+      setRelatedMap(map)
+    }).finally(() => setRelatedLoading(false))
+  }, [keywords])
 
   useEffect(() => {
     if (keywords.length === 0) {
@@ -126,6 +158,50 @@ export default function TrendsPage() {
       .catch(() => setTrendError('Ошибка сети'))
       .finally(() => setTrendLoading(false))
   }, [keywords, period, categoryId])
+
+  useEffect(() => {
+    if (keywords.length === 0) { setGoogleData([]); return }
+    const { startDate, endDate } = getPeriodDates(period.days)
+    setGoogleLoading(true)
+    setGoogleError(null)
+    fetch('/api/trends/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keywords, startDate, endDate }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.results) setGoogleData(buildChartData(data.results))
+        else if (data.error) setGoogleError(data.error)
+      })
+      .catch(() => setGoogleError('Ошибка сети'))
+      .finally(() => setGoogleLoading(false))
+  }, [keywords, period])
+
+  useEffect(() => {
+    if (keywords.length === 0) { setStatsNaver([]); setStatsGoogle([]); return }
+    const end = new Date()
+    const start = new Date(end.getTime() - 365 * 24 * 60 * 60 * 1000)
+    const fmt = (d: Date) => d.toISOString().slice(0, 10)
+    setStatsLoading(true)
+
+    Promise.all([
+      fetch('/api/trends/keywords', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startDate: fmt(start), endDate: fmt(end), timeUnit: 'month', keyword: keywords.map(k => ({ name: k, param: [k] })) }),
+      }).then(r => r.json()).then(d => d.results ?? []).catch(() => []),
+
+      fetch('/api/trends/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords, startDate: fmt(start), endDate: fmt(end) }),
+      }).then(r => r.json()).then(d => d.results ?? []).catch(() => []),
+    ]).then(([naver, google]) => {
+      setStatsNaver(naver)
+      setStatsGoogle(google)
+    }).finally(() => setStatsLoading(false))
+  }, [keywords])
 
   useEffect(() => {
     if (keywords.length === 0) { setVolumes([]); return }
@@ -186,16 +262,7 @@ export default function TrendsPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold">Тренды Naver Shopping</h1>
-          <select
-            value={categoryId}
-            onChange={e => setCategoryId(e.target.value)}
-            className="bg-[#1a1d2e] border border-[#2d3148] text-[#9ca3af] text-xs rounded-lg px-2 py-1.5 outline-none focus:border-[#6366f1] transition-colors"
-          >
-            {DATALAB_CATEGORIES.map(c => (
-              <option key={c.id} value={c.id}>{c.label}</option>
-            ))}
-          </select>
+          <h1 className="text-lg font-semibold">Тренды поиска Naver</h1>
         </div>
         <div className="flex gap-2">
           {PERIODS.map(p => (
@@ -271,7 +338,7 @@ export default function TrendsPage() {
       {/* Trend chart */}
       <div className="bg-[#1a1d2e] rounded-xl border border-[#2d3148] p-5 mb-4">
         <div className="flex items-center justify-between mb-4">
-          <p className="text-[13px] font-semibold">Динамика кликов (индекс 0–100)</p>
+          <p className="text-[13px] font-semibold">Naver — интерес к поиску (индекс 0–100)</p>
           {rateLimited && (
             <span className="text-[11px] text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 px-2 py-0.5 rounded-full">
               Rate limit — показаны кэшированные данные
@@ -323,6 +390,124 @@ export default function TrendsPage() {
         )}
       </div>
 
+      {/* Google Trends chart */}
+      <div className="bg-[#1a1d2e] rounded-xl border border-[#2d3148] p-5 mb-4">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <p className="text-[13px] font-semibold">Google Trends (Корея)</p>
+            <p className="text-[11px] text-[#4b5563] mt-0.5">Индекс интереса 0–100, гео: KR</p>
+          </div>
+        </div>
+
+        {keywords.length === 0 ? (
+          <div className="h-[220px] flex items-center justify-center text-[#4b5563] text-sm">
+            Выбери товар или добавь ключевые слова
+          </div>
+        ) : googleLoading ? (
+          <div className="h-[220px] flex items-center justify-center">
+            <div className="flex flex-col gap-2 w-full px-4">
+              {[80, 60, 90, 50, 70].map((w, i) => (
+                <div key={i} className="h-4 rounded bg-[#2d3148] animate-pulse" style={{ width: `${w}%` }} />
+              ))}
+            </div>
+          </div>
+        ) : googleError ? (
+          <div className="h-[220px] flex items-center justify-center text-[#6b7280] text-sm">{googleError}</div>
+        ) : googleData.length === 0 ? (
+          <div className="h-[220px] flex items-center justify-center text-[#6b7280] text-sm">Нет данных</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={googleData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <XAxis dataKey="period" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} dy={6} />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} width={30} />
+              <Tooltip
+                contentStyle={{ background: '#12141f', border: '1px solid #2d3148', borderRadius: 10, fontSize: 12 }}
+                labelStyle={{ color: '#e2e8f0', marginBottom: 4 }}
+              />
+              <Legend wrapperStyle={{ fontSize: 12, color: '#9ca3af', paddingTop: 8 }} />
+              {keywords.map((kw, i) => (
+                <Line
+                  key={kw}
+                  type="monotone"
+                  dataKey={kw}
+                  stroke={LINE_COLORS[i % LINE_COLORS.length]}
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* Average search index stats */}
+      {keywords.length > 0 && (
+        <div className="bg-[#1a1d2e] rounded-xl border border-[#2d3148] p-5 mb-4">
+          <p className="text-[13px] font-semibold mb-4">Средний индекс поиска</p>
+          {statsLoading ? (
+            <div className="space-y-2">
+              {[...Array(2)].map((_, i) => <div key={i} className="h-10 rounded bg-[#2d3148] animate-pulse" />)}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {keywords.map((kw, ki) => {
+                const STAT_PERIODS = [
+                  { label: '1 мес', months: 1 },
+                  { label: '3 мес', months: 3 },
+                  { label: '6 мес', months: 6 },
+                  { label: '9 мес', months: 9 },
+                  { label: '1 год', months: 12 },
+                ]
+
+                function calcAvgs(series: { title: string; data: { period: string; ratio: number }[] }[]) {
+                  const found = series.find(s => s.title === kw)
+                  if (!found) return STAT_PERIODS.map(p => ({ label: p.label, avg: null as number | null }))
+                  const now = new Date()
+                  return STAT_PERIODS.map(({ label, months }) => {
+                    const cutoff = new Date(now.getFullYear(), now.getMonth() - months + 1, 1).toISOString().slice(0, 7)
+                    const vals = found.data.filter(p => p.period >= cutoff).map(p => p.ratio).filter(v => v > 0)
+                    return { label, avg: vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null }
+                  })
+                }
+
+                const naverAvgs = calcAvgs(statsNaver)
+                const googleAvgs = calcAvgs(statsGoogle)
+
+                return (
+                  <div key={kw}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="inline-block w-2 h-2 rounded-full flex-shrink-0" style={{ background: LINE_COLORS[ki % LINE_COLORS.length] }} />
+                      <span className="text-xs font-medium text-[#9ca3af]">{kw}</span>
+                    </div>
+                    <div className="grid grid-cols-[80px_1fr] gap-2">
+                      <span className="text-[10px] text-[#4b5563] flex items-center">Naver</span>
+                      <div className="flex gap-2">
+                        {naverAvgs.map(({ label, avg }) => (
+                          <div key={label} className="flex-1 bg-[#12141f] rounded-lg px-2 py-2 text-center">
+                            <div className="text-[10px] text-[#4b5563] mb-0.5">{label}</div>
+                            <div className="text-sm font-semibold text-[#e2e8f0]">{avg ?? '—'}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <span className="text-[10px] text-[#4b5563] flex items-center">Google</span>
+                      <div className="flex gap-2">
+                        {googleAvgs.map(({ label, avg }) => (
+                          <div key={label} className="flex-1 bg-[#12141f] rounded-lg px-2 py-2 text-center">
+                            <div className="text-[10px] text-[#4b5563] mb-0.5">{label}</div>
+                            <div className="text-sm font-semibold text-[#e2e8f0]">{avg ?? '—'}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Search volume table */}
       {keywords.length > 0 && (
         <div className="bg-[#1a1d2e] rounded-xl border border-[#2d3148] p-5">
@@ -351,7 +536,14 @@ export default function TrendsPage() {
                       <td className="py-2">
                         <span className="inline-block w-2 h-2 rounded-full mr-2 flex-shrink-0"
                           style={{ background: LINE_COLORS[i % LINE_COLORS.length] }} />
-                        {kw}
+                        <a
+                          href={`https://www.coupang.com/np/search?q=${encodeURIComponent(kw)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-[#6366f1] transition-colors"
+                        >
+                          {kw}
+                        </a>
                       </td>
                       <td className="py-2 text-right text-[#9ca3af]">{fmt(v?.monthlyPcQcCnt)}</td>
                       <td className="py-2 text-right text-[#9ca3af]">{fmt(v?.monthlyMobileQcCnt)}</td>
@@ -361,6 +553,59 @@ export default function TrendsPage() {
                 })}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {/* Related keywords */}
+      {keywords.length > 0 && (
+        <div className="bg-[#1a1d2e] rounded-xl border border-[#2d3148] p-5 mt-4">
+          <p className="text-[13px] font-semibold mb-1">Похожие ключевые запросы</p>
+          <p className="text-[11px] text-[#4b5563] mb-4">Naver Search Ad — запросы по теме с объёмом поиска</p>
+
+          {relatedLoading ? (
+            <div className="space-y-2">
+              {[...Array(3)].map((_, i) => <div key={i} className="h-8 rounded bg-[#2d3148] animate-pulse" />)}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {keywords.map((kw, ki) => {
+                const related = relatedMap[kw] ?? []
+                return (
+                  <div key={kw}>
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="inline-block w-2 h-2 rounded-full flex-shrink-0" style={{ background: LINE_COLORS[ki % LINE_COLORS.length] }} />
+                      <span className="text-xs font-medium text-[#9ca3af]">{kw}</span>
+                      <span className="text-[10px] text-[#4b5563]">— {related.length} запросов</span>
+                    </div>
+                    {related.length === 0 ? (
+                      <p className="text-xs text-[#4b5563]">Нет данных</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-0.5">
+                        {related.map(r => (
+                          <div key={r.keyword} className="flex items-center justify-between py-2 border-b border-[#1e2233]">
+                            <button
+                              onClick={() => addKeyword(r.keyword)}
+                              disabled={keywords.includes(r.keyword) || keywords.length >= MAX_KEYWORDS}
+                              className="text-sm text-[#e2e8f0] hover:text-[#6366f1] disabled:text-[#4b5563] disabled:cursor-default transition-colors text-left truncate max-w-[200px]"
+                              title="Добавить в сравнение"
+                            >
+                              {r.keyword}
+                            </button>
+                            <div className="flex items-center gap-3 flex-shrink-0 ml-2">
+                              <span className="text-xs text-[#6b7280]">{r.volume > 0 ? r.volume.toLocaleString('ru-RU') + '/мес' : '< 20'}</span>
+                              <span className={`text-[11px] w-10 text-right ${r.competition === '높음' ? 'text-red-400' : r.competition === '중간' ? 'text-yellow-400' : 'text-green-400'}`}>
+                                {r.competition === '높음' ? 'Выс' : r.competition === '중간' ? 'Ср' : 'Низ'}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
       )}
