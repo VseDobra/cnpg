@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutGrid, List, Store, Image, Package,
-  DollarSign, Undo2, Tag, MessageSquare, Search, TrendingUp, Settings2, Compass
+  DollarSign, Undo2, Tag, MessageSquare, Search, TrendingUp, Settings2, Compass, Download
 } from 'lucide-react'
 
 const NAV = [
@@ -19,6 +19,7 @@ const NAV = [
   { href: '/research', icon: Search, label: 'Категории' },
   { href: '/trends', icon: TrendingUp, label: 'Тренды' },
   { href: '/discover', icon: Compass, label: 'Ниши' },
+  { href: '/scraper', icon: Download, label: 'Скрапер' },
   { href: '/settings', icon: Settings2, label: 'Настройки' },
 ]
 

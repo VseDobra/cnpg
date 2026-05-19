@@ -65,6 +65,9 @@ app/
   returns/[id]/page.tsx         — Детальная страница возврата
   settings/page.tsx             — Настройки + ручной синк + автогенерация для всех товаров
   coupons/page.tsx              — Купоны (создание, добавление товаров, отключение, polling статуса)
+  scraper/page.tsx              — Скрапер отзывов/конкурентов (генерит console-script для браузера)
+  api/scrape/full/route.ts      — Приём reviews+products, запись 7 табов в Sheets с вердиктом
+  api/scrape/reviews/route.ts   — Legacy: приём только reviews (используется старым console-script)
   tg/page.tsx                   — Telegram Mini App
 lib/
   coupang/client.ts             — HMAC авторизация
@@ -81,6 +84,9 @@ lib/
                                    fetchCouponsByOrderId, fetchRequestStatus
   categoryCache.ts              — кэш 18 000+ категорий на 30 дней (localStorage)
   sync.ts                       — главный синк, запускается каждый час
+  google/sheets.ts              — writeReviewsToSheet (legacy, простой dump)
+  google/sheets-analysis.ts     — writeNicheAnalysis (5 табов: summary с вердиктом, products, reviews, top_reviews, titles)
+  google/sheets-ai.ts           — analyzeReviewsAI через Claude Sonnet 4.6 → 2 таба (pains, positives)
 components/
   OrdersTable.tsx               — таблица заказов с фото и купонами
   KpiCard.tsx                   — карточка метрики
@@ -90,6 +96,20 @@ prisma/schema.prisma            — Order, OrderItem, Product, Inventory, Settle
 ## Браузерная автоматизация
 
 Для навигации на внешние сайты (coupang.com и др.) использовать **Playwright** (`mcp__playwright__*`), а не `claude-in-chrome` — у последнего встроен фильтр заблокированных сайтов, который не пускает на coupang.com.
+
+### КРИТИЧНО: Akamai блокирует ЛЮБОЙ автоматизированный браузер на coupang.com
+
+Проверено эмпирически (несколько часов мучений):
+- `chromium.launch({ headless: true })` → 403 RET9999
+- `chromium.launch({ headless: false, channel: 'chrome' })` → 403
+- `chromium.launch` + копия Chrome профиля пользователя → 403
+- `playwright-extra` + `puppeteer-extra-plugin-stealth` → 403
+- `chromium.connectOverCDP` к Chrome пользователя на `--remote-debugging-port=9222` → 403 даже у warm-tab; in-page `fetch('/np/search...')` тоже даёт RET9999
+- `mcp__playwright__*` → тоже 403
+
+**Почему console-script на coupang.com работает:** запросы инициированы из реального интерактивного браузера, у которого Akamai score прогретый. `Sec-Fetch-Site: same-origin` + cookies + interaction history.
+
+**Поэтому в `/scraper` НЕ пытаться использовать Playwright/CDP**. Решение — генерим JS-скрипт пользователю, он вставляет его в DevTools на coupang.com.
 
 ## Важные детали реализации
 
@@ -104,6 +124,44 @@ RG orders API не возвращает адрес получателя. При 
 
 ### Купоны на детальной странице заказа
 Дедупликация по couponId — один купон может вернуться несколько раз (по числу товаров в заказе).
+
+### Скрапер /scraper — конкурентный анализ ниши
+
+Workflow:
+1. Пользователь вводит keyword + Sheet ID на странице `/scraper`
+2. Страница генерит готовый JS-скрипт с подставленными значениями
+3. Пользователь копирует, открывает coupang.com/np/search?q=... → F12 → Console → вставляет → Enter
+4. Скрипт собирает в браузере пользователя:
+   - **Reviews**: `/next-api/review?productId={id}&page={n}&size=20&sortBy=ORDER_SCORE_ASC` (с retry × 3, таймаут 12с, cap 50 страниц на товар)
+   - **Products (JSON-LD)**: `/vp/products/{id}` → парсит `<script type="application/ld+json">` → Product + BreadcrumbList → цена, originalPrice, discountPct, rating, reviewCount, images, category, sku, availability; regex добор: isRocket, isWow, recentBuyers (`한 ?달간 N명`), seller, couponDiscount
+5. POST на `http://localhost:3000/api/scrape/full` с `{ reviews, products, sheetId, sheetName, keyword }`
+6. API вызывает `writeNicheAnalysis` → 5 табов с форматированием + `analyzeReviewsAI` (Claude Sonnet 4.6) → ещё 2 таба
+
+**Табы в Google Sheets** (префикс `{sheetName}__`):
+- `__summary` — вердикт 🟢 GO / 🟡 MAYBE / 🔴 SKIP по 5 критериям + метрики
+- `__products` — карточки конкурентов (16 колонок)
+- `__reviews` — все отзывы с conditional formatting по рейтингу
+- `__top_reviews` — топ-50 по helpful
+- `__titles` — частые слова в названиях (порог: ≥2 вхождений)
+- `__pains` — AI: повторяющиеся жалобы с count и цитатами
+- `__positives` — AI: что хвалят с count и цитатами
+
+**Логика вердикта** (`computeVerdict` в `sheets-analysis.ts`) — 5 баллов:
+- products ≥ 15
+- median(reviewCount) ≥ 30
+- avgRating < 4.5 И негатив > 5%
+- median(price) ≥ 10.000₩
+- top-3 концентрация < 50% от суммы отзывов
+- Итог: 4-5 → GO, 2-3 → MAYBE, 0-1 → SKIP
+
+**CORS для POST с coupang.com на localhost:**
+- Chrome 94+ блокирует public → private network запросы (Private Network Access)
+- Нужен заголовок `Access-Control-Allow-Private-Network: true` на OPTIONS preflight (уже добавлен в `/api/scrape/reviews/route.ts` и `/api/scrape/full/route.ts`)
+
+**Восстановление при сбое POST:**
+- Скрипт сохраняет данные в `window.__coupangReviews`, `window.__coupangProducts`, `window.__coupangMeta`
+- Из консоли можно вызвать `__retryUpload()` чтобы переотправить без пересбора
+- Fallback: при ошибке скачивает JSON через `<a download>`
 
 ## Что осталось сделать
 
