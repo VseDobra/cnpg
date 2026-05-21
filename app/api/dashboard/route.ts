@@ -1,31 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 
+// All day/week boundaries are computed in KST (Asia/Seoul, UTC+9, no DST)
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function kstDayStart(d: Date = new Date()): Date {
+  const shifted = new Date(d.getTime() + KST_OFFSET_MS)
+  shifted.setUTCHours(0, 0, 0, 0)
+  return new Date(shifted.getTime() - KST_OFFSET_MS)
+}
+
+function kstDateKey(d: Date): string {
+  return new Date(d.getTime() + KST_OFFSET_MS).toISOString().split('T')[0]
+}
+
+function kstDow(d: Date): number {
+  const jsDay = new Date(d.getTime() + KST_OFFSET_MS).getUTCDay()
+  return jsDay === 0 ? 6 : jsDay - 1
+}
+
 export async function GET(req: NextRequest) {
   const days = parseInt(req.nextUrl.searchParams.get('days') ?? '30')
-  const from = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-  const prevFrom = new Date(from.getTime() - days * 24 * 60 * 60 * 1000)
 
-  // Today / yesterday boundaries (UTC)
-  const todayStart = new Date()
-  todayStart.setUTCHours(0, 0, 0, 0)
-  const yesterdayStart = new Date(todayStart)
-  yesterdayStart.setUTCDate(yesterdayStart.getUTCDate() - 1)
+  const todayStart = kstDayStart()
+  const from = new Date(todayStart.getTime() - (days - 1) * DAY_MS)
+  const prevFrom = new Date(from.getTime() - days * DAY_MS)
 
-  // This week / last week (Mon–Sun UTC)
-  const dow = todayStart.getUTCDay()
-  const daysSinceMon = dow === 0 ? 6 : dow - 1
-  const thisWeekStart = new Date(todayStart)
-  thisWeekStart.setUTCDate(thisWeekStart.getUTCDate() - daysSinceMon)
-  const lastWeekStart = new Date(thisWeekStart)
-  lastWeekStart.setUTCDate(lastWeekStart.getUTCDate() - 7)
+  const yesterdayStart = new Date(todayStart.getTime() - DAY_MS)
 
-  const [orders, prevOrders, inventory, products, returns, recentOrders, todayOrders, yesterdayOrders, thisWeekOrders, lastWeekOrders] = await Promise.all([
+  const dow = kstDow(todayStart)
+  const thisWeekStart = new Date(todayStart.getTime() - dow * DAY_MS)
+  const lastWeekStart = new Date(thisWeekStart.getTime() - 7 * DAY_MS)
+
+  const [orders, prevOrders, inventory, products, returns, prevReturns, recentOrders, todayOrders, yesterdayOrders, thisWeekOrders, lastWeekOrders] = await Promise.all([
     prisma.order.findMany({ where: { orderedAt: { gte: from } }, include: { items: true } }),
     prisma.order.findMany({ where: { orderedAt: { gte: prevFrom, lt: from } }, include: { items: true } }),
     prisma.inventory.findMany(),
     prisma.product.findMany(),
     prisma.return.findMany({ where: { requestedAt: { gte: from } } }),
+    prisma.return.findMany({ where: { requestedAt: { gte: prevFrom, lt: from } } }),
     prisma.order.findMany({ orderBy: { orderedAt: 'desc' }, take: 5, include: { items: true } }),
     prisma.order.findMany({ where: { orderedAt: { gte: todayStart } } }),
     prisma.order.findMany({ where: { orderedAt: { gte: yesterdayStart, lt: todayStart } } }),
@@ -46,25 +60,29 @@ export async function GET(req: NextRequest) {
   const thisWeekRevenue = thisWeekOrders.reduce((s, o) => s + o.totalPrice, 0)
   const lastWeekRevenue = lastWeekOrders.reduce((s, o) => s + o.totalPrice, 0)
 
-  // Daily sales chart
+  // Daily sales chart (KST days)
   const dailySales: Record<string, number> = {}
+  const dailyUnits: Record<string, number> = {}
   for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
-    dailySales[d.toISOString().split('T')[0]] = 0
+    const key = kstDateKey(new Date(todayStart.getTime() - i * DAY_MS))
+    dailySales[key] = 0
+    dailyUnits[key] = 0
   }
   for (const o of orders) {
-    const key = o.orderedAt.toISOString().split('T')[0]
-    if (key in dailySales) dailySales[key] += o.totalPrice
+    const key = kstDateKey(o.orderedAt)
+    if (key in dailySales) {
+      dailySales[key] += o.totalPrice
+      for (const item of o.items) dailyUnits[key] += item.quantity
+    }
   }
 
-  // Day-of-week heatmap (0=Mon..6=Sun)
+  // Day-of-week heatmap (0=Mon..6=Sun, KST)
   const dowSales = Array(7).fill(0)
   const dowCounts = Array(7).fill(0)
   for (const o of orders) {
-    const jsDay = o.orderedAt.getDay() // 0=Sun
-    const dow = jsDay === 0 ? 6 : jsDay - 1 // convert to Mon=0
-    dowSales[dow] += o.totalPrice
-    dowCounts[dow]++
+    const d = kstDow(o.orderedAt)
+    dowSales[d] += o.totalPrice
+    dowCounts[d]++
   }
 
   const productMap = Object.fromEntries(products.map(p => [p.id, p]))
@@ -99,8 +117,8 @@ export async function GET(req: NextRequest) {
       statsMap[item.productId].orderIds.add(o.id)
       statsMap[item.productId].quantity += item.quantity
 
-      // Accumulate daily profit
-      const dayKey = o.orderedAt.toISOString().split('T')[0]
+      // Accumulate daily profit (KST)
+      const dayKey = kstDateKey(o.orderedAt)
       if (dayKey in dailyProfit) {
         const s = statsMap[item.productId]
         if (s.cost > 0) {
@@ -139,7 +157,7 @@ export async function GET(req: NextRequest) {
       unitsSold,
       prevUnitsSold,
       returnCount: returns.length,
-      prevReturnCount: 0,
+      prevReturnCount: prevReturns.length,
       netProfit,
       hasCostData,
       avgOrderValue,
@@ -149,7 +167,7 @@ export async function GET(req: NextRequest) {
       thisWeekRevenue,
       lastWeekRevenue,
     },
-    dailySales: Object.entries(dailySales).map(([date, amount]) => ({ date, amount, profit: dailyProfit[date] ?? 0 })),
+    dailySales: Object.entries(dailySales).map(([date, amount]) => ({ date, amount, profit: dailyProfit[date] ?? 0, units: dailyUnits[date] ?? 0 })),
     dowSales: dowSales.map((amount, i) => ({
       day: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'][i],
       amount,
@@ -163,7 +181,7 @@ export async function GET(req: NextRequest) {
         id: o.id,
         product: firstItem?.productName ?? '—',
         amount: o.totalPrice,
-        date: o.orderedAt.toISOString().split('T')[0],
+        date: kstDateKey(o.orderedAt),
         status: o.status,
         imageUrl,
       }

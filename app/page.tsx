@@ -17,7 +17,7 @@ type DashData = {
     todayRevenue: number; yesterdayRevenue: number
     thisWeekRevenue: number; lastWeekRevenue: number
   }
-  dailySales: { date: string; amount: number; profit: number }[]
+  dailySales: { date: string; amount: number; profit: number; units: number }[]
   dowSales: { day: string; amount: number; orders: number }[]
   recentOrders: { id: string; product: string; amount: number; date: string; status: string; imageUrl?: string | null }[]
   productBreakdown: { name: string; imageUrl: string | null; revenue: number; orderCount: number; quantity: number; profit: number | null; margin: number | null }[]
