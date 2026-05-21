@@ -117,3 +117,112 @@ model ResearchHistory {
   risks         String
   searchedAt    DateTime @default(now())
 }
+
+model ScraperRun {
+  id           String   @id @default(cuid())
+  keyword      String
+  scrapedAt    DateTime @default(now())
+  verdictLevel String
+  verdictText  String
+  metrics      String   // JSON: products, sellers, medianPrice, avgRating, etc.
+  reasons      String   // JSON string[] — verdict reasons
+  sheetTabs    String?  // JSON string[] — written sheet tab names
+  reviewCount  Int      @default(0)
+  productCount Int      @default(0)
+  searchVolume String?  // JSON NicheSearchSummary from Naver Ads (seed + related)
+  aiExtended   String?  // JSON ExtendedAnalysis (positive_drivers, improvement_areas, etc.)
+
+  products  ScrapedProduct[]
+  reviews   ScrapedReview[]
+  questions ScrapedQuestion[]
+  tags      ScrapedTag[]
+  topics    ScrapedTopic[]
+}
+
+model ScrapedProduct {
+  id             String  @id @default(cuid())
+  runId          String
+  productId      String
+  name           String
+  price          Int
+  originalPrice  Int
+  discountPct    Int
+  couponDiscount Int
+  rating         Float
+  reviewCount    Int
+  imageCount     Int
+  firstImage     String
+  category       String
+  url            String
+  seller         String
+  isRocket       Boolean @default(false)
+  isWow          Boolean @default(false)
+  recentBuyers   Int?
+  searchRank     Int? // position in search results
+
+  run ScraperRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+}
+
+model ScrapedReview {
+  id          String @id @default(cuid())
+  runId       String
+  productId   String
+  productName String
+  reviewId    String
+  rating      Int
+  reviewedAt  String // YYYY-MM-DD
+  reviewer    String
+  helpful     Int    @default(0)
+  title       String
+  content     String
+  photos      String // JSON string[] — review photo URLs
+
+  run ScraperRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([runId, productId])
+}
+
+model ScrapedQuestion {
+  id         String   @id @default(cuid())
+  runId      String
+  productId  String
+  questionId String
+  question   String
+  answer     String
+  askedAt    String? // YYYY-MM-DD
+  answeredAt String?
+
+  run ScraperRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+}
+
+model ScrapedTag {
+  id        String @id @default(cuid())
+  runId     String
+  productId String
+  tag       String // "디자인이 예뻐요"
+  count     Int    @default(0)
+
+  run ScraperRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+}
+
+model ScrapedTopic {
+  id        String @id @default(cuid())
+  runId     String
+  kind      String // 'pain' | 'positive'
+  topic     String
+  count     Int
+  quotes    String // JSON string[]
+  reviewIds String // JSON string[] — which reviewIds this topic covers
+  rank      Int    @default(0)
+
+  run ScraperRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+}

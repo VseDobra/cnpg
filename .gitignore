@@ -58,3 +58,9 @@ response.txt
 
 # Agent
 agent/node_modules/
+
+# Local debug artifacts (scraper screenshots, raw response dumps)
+/*.png
+/*_reviews.csv
+/reviews_raw.json
+/scrape_result.json

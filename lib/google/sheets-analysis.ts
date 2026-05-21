@@ -1,4 +1,8 @@
 import { google, sheets_v4 } from 'googleapis'
+import type { NicheSearchSummary, KeywordStat } from '@/lib/naver/ads'
+import { computeVerdict, type Verdict } from '@/lib/explorer/verdict'
+
+export type { Verdict } from '@/lib/explorer/verdict'
 
 function getAuth() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!)
@@ -18,6 +22,7 @@ export interface Review {
   helpful: number
   title: string
   content: string
+  photos?: string[]
 }
 
 export interface Product {
@@ -40,95 +45,22 @@ export interface Product {
   isWow: boolean
   recentBuyers: number | null
   seller: string
+  searchRank?: number | null
 }
 
-export interface Verdict {
-  level: 'GO' | 'MAYBE' | 'SKIP'
-  emoji: string
-  text: string
-  reasons: string[]
-  metrics: Record<string, number | string>
+export interface Tag {
+  productId: string
+  tag: string
+  count: number
 }
 
-const median = (arr: number[]) => {
-  const a = arr.filter((n) => Number.isFinite(n) && n > 0).slice().sort((x, y) => x - y)
-  if (!a.length) return 0
-  const m = Math.floor(a.length / 2)
-  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2
-}
-const avg = (arr: number[]) => {
-  const a = arr.filter((n) => Number.isFinite(n) && n > 0)
-  return a.length ? a.reduce((s, n) => s + n, 0) / a.length : 0
-}
-
-function computeVerdict(products: Product[], reviews: Review[]): Verdict {
-  const prices = products.map((p) => p.price)
-  const ratings = products.map((p) => p.rating)
-  const reviewCounts = products.map((p) => p.reviewCount)
-  const totalReviews = reviewCounts.reduce((s, n) => s + n, 0)
-  const top3Reviews = reviewCounts.slice().sort((a, b) => b - a).slice(0, 3).reduce((s, n) => s + n, 0)
-  const concentrationTop3 = totalReviews > 0 ? top3Reviews / totalReviews : 0
-
-  const sellers = new Set(products.map((p) => p.seller).filter(Boolean))
-  const rocketShare = products.filter((p) => p.isRocket).length / Math.max(1, products.length)
-  const medPrice = median(prices)
-  const avgRating = avg(ratings)
-  const medReviews = median(reviewCounts)
-
-  const dist = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 } as Record<number, number>
-  for (const r of reviews) {
-    const k = Math.max(1, Math.min(5, Math.round(r.rating)))
-    dist[k]++
-  }
-  const totalDist = Object.values(dist).reduce((s, n) => s + n, 0)
-  const negShare = totalDist ? (dist[1] + dist[2]) / totalDist : 0
-
-  const reasons: string[] = []
-  let goScore = 0
-
-  // Demand: enough product market activity
-  if (products.length >= 15) { goScore++; reasons.push(`✓ ${products.length} активных листингов`) }
-  else reasons.push(`⚠️ только ${products.length} листингов — рынок узкий`)
-
-  if (medReviews >= 30) { goScore++; reasons.push(`✓ медиана ${medReviews} отзывов — спрос есть`) }
-  else if (medReviews >= 10) reasons.push(`〜 медиана ${medReviews} отзывов — спрос слабый`)
-  else reasons.push(`✗ медиана ${medReviews} отзывов — нет спроса`)
-
-  // Quality gap (opportunity to compete on quality)
-  if (avgRating < 4.5 && negShare > 0.05) { goScore++; reasons.push(`✓ средний рейтинг ${avgRating.toFixed(2)}, негатив ${(negShare * 100).toFixed(0)}% — есть куда давить`) }
-  else if (avgRating >= 4.7) reasons.push(`✗ средний рейтинг ${avgRating.toFixed(2)} — конкуренты делают слишком хорошо`)
-  else reasons.push(`〜 средний рейтинг ${avgRating.toFixed(2)}`)
-
-  // Margin
-  if (medPrice >= 10000) { goScore++; reasons.push(`✓ медиана цены ${medPrice.toLocaleString()}₩ — нормальная маржа`) }
-  else if (medPrice >= 5000) reasons.push(`〜 медиана цены ${medPrice.toLocaleString()}₩ — тонкая маржа`)
-  else reasons.push(`✗ медиана цены ${medPrice.toLocaleString()}₩ — нет маржи`)
-
-  // Concentration (avoid oligopoly)
-  if (concentrationTop3 < 0.5) { goScore++; reasons.push(`✓ ТОП-3 держат ${(concentrationTop3 * 100).toFixed(0)}% отзывов — рынок не закрыт`) }
-  else if (concentrationTop3 < 0.7) reasons.push(`〜 ТОП-3 держат ${(concentrationTop3 * 100).toFixed(0)}% — концентрация средняя`)
-  else reasons.push(`✗ ТОП-3 держат ${(concentrationTop3 * 100).toFixed(0)}% — олигополия`)
-
-  const level: 'GO' | 'MAYBE' | 'SKIP' = goScore >= 4 ? 'GO' : goScore >= 2 ? 'MAYBE' : 'SKIP'
-  const emoji = level === 'GO' ? '🟢' : level === 'MAYBE' ? '🟡' : '🔴'
-
-  return {
-    level,
-    emoji,
-    text: `${emoji} ${level} (${goScore}/5)`,
-    reasons,
-    metrics: {
-      products: products.length,
-      sellers: sellers.size,
-      medianPrice: medPrice,
-      avgRating: Number(avgRating.toFixed(2)),
-      medianReviewCount: medReviews,
-      totalReviewsCollected: reviews.length,
-      negativeShare: Number((negShare * 100).toFixed(1)),
-      top3Concentration: Number((concentrationTop3 * 100).toFixed(1)),
-      rocketShare: Number((rocketShare * 100).toFixed(1)),
-    },
-  }
+export interface Question {
+  productId: string
+  questionId: string
+  question: string
+  answer: string
+  askedAt?: string
+  answeredAt?: string
 }
 
 function titleWordFrequency(products: Product[]): Array<[string, number]> {
@@ -216,13 +148,16 @@ async function applyFormatting(sheets: sheets_v4.Sheets, spreadsheetId: string, 
 export async function writeNicheAnalysis(
   spreadsheetId: string,
   baseName: string,
-  data: { reviews: Review[]; products: Product[]; keyword?: string },
+  data: { reviews: Review[]; products: Product[]; tags?: Tag[]; questions?: Question[]; keyword?: string; searchVolume?: NicheSearchSummary | null },
 ): Promise<{ tabs: string[]; verdict: Verdict }> {
   const auth = getAuth()
   const sheets = google.sheets({ version: 'v4', auth })
 
   const reviews = data.reviews ?? []
   const products = data.products ?? []
+  const tags = data.tags ?? []
+  const questions = data.questions ?? []
+  const searchVolume = data.searchVolume ?? null
   const verdict = computeVerdict(products, reviews)
 
   // 1) SUMMARY (главный таб)
@@ -245,10 +180,17 @@ export async function writeNicheAnalysis(
     ['Доля негатива (1-2★), %', m.negativeShare],
     ['Концентрация ТОП-3, %', m.top3Concentration],
     ['Доля Rocket-доставки, %', m.rocketShare],
-    [],
-    ['Обоснование'],
-    ...verdict.reasons.map((r) => [r]),
   ]
+  if (searchVolume) {
+    summaryRows.push(
+      ['Naver: запросов/мес (seed)', searchVolume.seedMonthlyTotal],
+      ['Naver: конкуренция (seed)', searchVolume.seedCompetition],
+      ['Naver: глубина рекламы (seed)', searchVolume.seedAdDepth],
+      ['Naver: связанных ключей', searchVolume.relatedCount],
+      ['Naver: суммарный спрос экосистемы', searchVolume.totalEcosystemSearches],
+    )
+  }
+  summaryRows.push([], ['Обоснование'], ...verdict.reasons.map((r) => [r]))
   await writeRows(sheets, spreadsheetId, summaryTab, summaryRows)
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
@@ -329,8 +271,160 @@ export async function writeNicheAnalysis(
   await writeRows(sheets, spreadsheetId, titlesTab, titleRows)
   await applyFormatting(sheets, spreadsheetId, titlesSheetId, { headerCols: 2 })
 
+  const writtenTabs = [summaryTab, productsTab, reviewsTab, topTab, titlesTab]
+
+  // 6) PHOTOS — галерея фото из отзывов
+  const reviewsWithPhotos = reviews.filter((r) => r.photos && r.photos.length > 0)
+  if (reviewsWithPhotos.length) {
+    const photosTab = `${baseName}__photos`
+    const photosSheetId = await ensureSheet(sheets, spreadsheetId, photosTab)
+    const photosHeaders = ['productId', 'productName', 'reviewId', 'rating', 'photoUrl', 'preview']
+    const photosRows: (string | number)[][] = [photosHeaders]
+    for (const r of reviewsWithPhotos) {
+      for (const url of r.photos!) {
+        photosRows.push([
+          r.productId,
+          r.productName,
+          String(r.reviewId),
+          r.rating,
+          url,
+          `=IMAGE("${url.replace(/"/g, '')}", 4, 80, 80)`,
+        ])
+      }
+    }
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${photosTab}!A1`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: photosRows },
+    })
+    await applyFormatting(sheets, spreadsheetId, photosSheetId, { headerCols: photosHeaders.length, ratingCol: 3 })
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            updateDimensionProperties: {
+              range: { sheetId: photosSheetId, dimension: 'ROWS', startIndex: 1, endIndex: photosRows.length },
+              properties: { pixelSize: 90 },
+              fields: 'pixelSize',
+            },
+          },
+          {
+            updateDimensionProperties: {
+              range: { sheetId: photosSheetId, dimension: 'COLUMNS', startIndex: 5, endIndex: 6 },
+              properties: { pixelSize: 100 },
+              fields: 'pixelSize',
+            },
+          },
+        ],
+      },
+    })
+    writtenTabs.push(photosTab)
+  }
+
+  // 7) Q&A — вопросы покупателей
+  if (questions.length) {
+    const qaTab = `${baseName}__qa`
+    const qaSheetId = await ensureSheet(sheets, spreadsheetId, qaTab)
+    const qaHeaders = ['productId', 'askedAt', 'answeredAt', 'question', 'answer']
+    const qaRows: (string | number)[][] = [
+      qaHeaders,
+      ...questions.map((q) => [q.productId, q.askedAt ?? '', q.answeredAt ?? '', q.question, q.answer]),
+    ]
+    await writeRows(sheets, spreadsheetId, qaTab, qaRows)
+    await applyFormatting(sheets, spreadsheetId, qaSheetId, { headerCols: qaHeaders.length })
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            updateDimensionProperties: {
+              range: { sheetId: qaSheetId, dimension: 'COLUMNS', startIndex: 3, endIndex: 5 },
+              properties: { pixelSize: 400 },
+              fields: 'pixelSize',
+            },
+          },
+        ],
+      },
+    })
+    writtenTabs.push(qaTab)
+  }
+
+  // 8a) SEARCH VOLUME — Naver Ads (seed + related)
+  if (searchVolume && (searchVolume.seedMonthlyTotal > 0 || searchVolume.relatedTopN.length)) {
+    const svTab = `${baseName}__search_volume`
+    const svSheetId = await ensureSheet(sheets, spreadsheetId, svTab)
+    const svHeaders = ['ключевик', 'PC/мес', 'mobile/мес', 'всего/мес', 'avg PC клики', 'avg mobile клики', 'CTR PC %', 'CTR mobile %', 'глубина рекламы', 'конкуренция', 'seed?']
+    const seedRow: KeywordStat | undefined = searchVolume.relatedTopN.find(() => false) // placeholder, seed строится отдельно
+    void seedRow
+    const allRows: KeywordStat[] = [
+      // seed row first
+      {
+        keyword: searchVolume.seedKeyword,
+        monthlyPc: 0,
+        monthlyMobile: 0,
+        monthlyTotal: searchVolume.seedMonthlyTotal,
+        avgPcClicks: 0,
+        avgMobileClicks: 0,
+        ctrPc: 0,
+        ctrMobile: 0,
+        adDepth: searchVolume.seedAdDepth,
+        competition: searchVolume.seedCompetition,
+        isSeed: true,
+      },
+      ...searchVolume.relatedTopN,
+    ]
+    const svRows: (string | number)[][] = [
+      svHeaders,
+      ...allRows.map((k) => [
+        k.keyword,
+        k.monthlyPc === -1 ? '<10' : k.monthlyPc,
+        k.monthlyMobile === -1 ? '<10' : k.monthlyMobile,
+        k.monthlyTotal,
+        k.avgPcClicks,
+        k.avgMobileClicks,
+        k.ctrPc,
+        k.ctrMobile,
+        k.adDepth,
+        k.competition,
+        k.isSeed ? 'Y' : '',
+      ]),
+    ]
+    await writeRows(sheets, spreadsheetId, svTab, svRows)
+    await applyFormatting(sheets, spreadsheetId, svSheetId, { headerCols: svHeaders.length })
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            updateDimensionProperties: {
+              range: { sheetId: svSheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 },
+              properties: { pixelSize: 240 },
+              fields: 'pixelSize',
+            },
+          },
+        ],
+      },
+    })
+    writtenTabs.push(svTab)
+  }
+
+  // 8) COUPANG TAGS — агрегированные хэштеги от Coupang
+  if (tags.length) {
+    const tagsAgg = new Map<string, number>()
+    for (const t of tags) tagsAgg.set(t.tag, (tagsAgg.get(t.tag) ?? 0) + t.count)
+    const tagsSorted = [...tagsAgg.entries()].sort((a, b) => b[1] - a[1])
+    const tagsTab = `${baseName}__coupang_tags`
+    const tagsSheetId = await ensureSheet(sheets, spreadsheetId, tagsTab)
+    const tagsRows: (string | number)[][] = [['тег', 'суммарно по всем товарам'], ...tagsSorted]
+    await writeRows(sheets, spreadsheetId, tagsTab, tagsRows)
+    await applyFormatting(sheets, spreadsheetId, tagsSheetId, { headerCols: 2 })
+    writtenTabs.push(tagsTab)
+  }
+
   return {
-    tabs: [summaryTab, productsTab, reviewsTab, topTab, titlesTab],
+    tabs: writtenTabs,
     verdict,
   }
 }

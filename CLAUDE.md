@@ -65,8 +65,11 @@ app/
   returns/[id]/page.tsx         — Детальная страница возврата
   settings/page.tsx             — Настройки + ручной синк + автогенерация для всех товаров
   coupons/page.tsx              — Купоны (создание, добавление товаров, отключение, polling статуса)
-  scraper/page.tsx              — Скрапер отзывов/конкурентов (генерит console-script для браузера)
-  api/scrape/full/route.ts      — Приём reviews+products, запись 7 табов в Sheets с вердиктом
+  explorer/page.tsx             — Opportunity Explorer: форма + история прогонов из БД (внутренне Prisma модель ScraperRun)
+  explorer/[id]/page.tsx        — Explorer прогона: вердикт, pains/positives, фото, Q&A, продукты, теги
+  api/explorer/full/route.ts    — Приём reviews+products+tags+questions, запись табов в Sheets + persist в БД
+  api/explorer/runs/route.ts    — GET список прогонов, DELETE прогона
+  api/explorer/runs/[id]/route.ts — GET один прогон со всеми отзывами/вопросами/тегами/темами
   api/scrape/reviews/route.ts   — Legacy: приём только reviews (используется старым console-script)
   tg/page.tsx                   — Telegram Mini App
 lib/
@@ -85,12 +88,13 @@ lib/
   categoryCache.ts              — кэш 18 000+ категорий на 30 дней (localStorage)
   sync.ts                       — главный синк, запускается каждый час
   google/sheets.ts              — writeReviewsToSheet (legacy, простой dump)
-  google/sheets-analysis.ts     — writeNicheAnalysis (5 табов: summary с вердиктом, products, reviews, top_reviews, titles)
-  google/sheets-ai.ts           — analyzeReviewsAI через Claude Sonnet 4.6 → 2 таба (pains, positives)
+  google/sheets-analysis.ts     — writeNicheAnalysis (до 8 табов: summary, products, reviews, top_reviews, titles, photos, qa, coupang_tags)
+  google/sheets-ai.ts           — analyzeReviewsAI через Claude Sonnet 4.6 → до 3 табов (pains, positives, pre_fears) с reviewId-привязкой тем
 components/
   OrdersTable.tsx               — таблица заказов с фото и купонами
   KpiCard.tsx                   — карточка метрики
-prisma/schema.prisma            — Order, OrderItem, Product, Inventory, Settlement, Return, SyncLog
+prisma/schema.prisma            — Order, OrderItem, Product, Inventory, Settlement, Return, SyncLog,
+                                   ScraperRun + ScrapedProduct/Review/Question/Tag/Topic (история прогонов скрапера)
 ```
 
 ## Браузерная автоматизация
@@ -109,7 +113,7 @@ prisma/schema.prisma            — Order, OrderItem, Product, Inventory, Settle
 
 **Почему console-script на coupang.com работает:** запросы инициированы из реального интерактивного браузера, у которого Akamai score прогретый. `Sec-Fetch-Site: same-origin` + cookies + interaction history.
 
-**Поэтому в `/scraper` НЕ пытаться использовать Playwright/CDP**. Решение — генерим JS-скрипт пользователю, он вставляет его в DevTools на coupang.com.
+**Поэтому в `/explorer` НЕ пытаться использовать Playwright/CDP**. Решение — генерим JS-скрипт пользователю, он вставляет его в DevTools на coupang.com.
 
 ## Важные детали реализации
 
@@ -125,17 +129,57 @@ RG orders API не возвращает адрес получателя. При 
 ### Купоны на детальной странице заказа
 Дедупликация по couponId — один купон может вернуться несколько раз (по числу товаров в заказе).
 
-### Скрапер /scraper — конкурентный анализ ниши
+### Opportunity Explorer /explorer — конкурентный анализ ниши
+
+**Переименовано из «скрапер» → «Opportunity Explorer»**: Coupang не любит слово scrape. В скрипте префикс логов `[oe]`, globals `window.__oeData/__oeMeta/__oeRetry`. Внутренние имена (Prisma `ScraperRun`, `lib/scraper/`) оставлены — они не утекают на coupang.com.
 
 Workflow:
-1. Пользователь вводит keyword + Sheet ID на странице `/scraper`
+1. Пользователь вводит keyword + Sheet ID на странице `/explorer`
 2. Страница генерит готовый JS-скрипт с подставленными значениями
 3. Пользователь копирует, открывает coupang.com/np/search?q=... → F12 → Console → вставляет → Enter
 4. Скрипт собирает в браузере пользователя:
-   - **Reviews**: `/next-api/review?productId={id}&page={n}&size=20&sortBy=ORDER_SCORE_ASC` (с retry × 3, таймаут 12с, cap 50 страниц на товар)
-   - **Products (JSON-LD)**: `/vp/products/{id}` → парсит `<script type="application/ld+json">` → Product + BreadcrumbList → цена, originalPrice, discountPct, rating, reviewCount, images, category, sku, availability; regex добор: isRocket, isWow, recentBuyers (`한 ?달간 N명`), seller, couponDiscount
-5. POST на `http://localhost:3000/api/scrape/full` с `{ reviews, products, sheetId, sheetName, keyword }`
-6. API вызывает `writeNicheAnalysis` → 5 табов с форматированием + `analyzeReviewsAI` (Claude Sonnet 4.6) → ещё 2 таба
+   - **Этапы 1+3 (объединены): ID + полные карточки из RSC-payload страницы поиска** (см. ниже)
+   - **Reviews**: `/next-api/review?productId={id}&page={n}&size=20&sortBy=ORDER_SCORE_ASC` (с retry × 3, таймаут 12с, cap 50 страниц). Извлекает `attachmentImages` (URL фото отзывов).
+   - **Q&A**: пробуем три endpoint`a по очереди — `/next-api/inquiries`, `/next-api/qna`, `/vp/product/inquiries/{id}`. Только по топ-10 листингам (экономия)
+5. POST на `http://localhost:3000/api/explorer/full` с `{ reviews, products, tags, questions, sheetId, sheetName, keyword }`
+6. API вызывает `writeNicheAnalysis` → до 8 табов + `analyzeReviewsAI` → до 3 табов, **+ персистит весь прогон в БД** (ScraperRun + связанные). Возвращает `runId` → ссылка на explorer.
+
+### КРИТИЧНО: JSON-LD на /vp/products/ удалён Coupang в 2026 — парсим RSC-payload
+
+Старый Stage 3 (по 1 fetch на товар, парс `<script type="application/ld+json">`) **больше не работает**: JSON-LD блоки убраны со страницы товара. Сейчас Stage 3 объединён со Stage 1 и читает данные с **страницы поиска** через Next.js App Router RSC payload:
+
+1. Один fetch на `/np/search?q=KEYWORD&page=N`
+2. В HTML лежат блоки `self.__next_f.push([1, "..."])` (~56 штук, ~1.5MB суммарно)
+3. JSON-aware regex `(?:[^"\\]|\\.)*` извлекает body каждой push-строки (важно: lazy `[\s\S]*?` ломается на экранированных `\"` внутри payload — поэтому именно эта форма)
+4. Конкатенация всех body → текст T, содержащий JSON-фрагменты
+5. Балансировка скобок вокруг якоря `"divisionType":"GOODS"` → JSON.parse каждого товара
+6. Маппинг полей RSC → карточка
+
+**Структура RSC-объекта одного товара (ключи алфавитные):**
+- `id` (number) — productId для URL `/vp/products/{id}`
+- `itemId` — variant ID для query `?itemId=...`
+- `imagePath` — относительный путь, полный URL = `https://thumbnail.coupangcdn.com/thumbnails/remote/492x492ex/image/{imagePath}`
+- `itemAttributes[]` — массив опций; **название** лежит в спец-атрибуте с `id: 2147483607`, поле `value` это JSON со `default.len10_title` / `default.len20_title`
+- `itemProfiling.metrics`:
+  - `shared_item-top-conversion-keyword_1` — топ ключевик, по которому товар конвертит (золото для конкурентного анализа)
+  - `shared_item-clearing-price-amount_1` — фактическая средняя цена транзакции
+  - `shared_item-impression-price-last7d_1` — avg/min цены за 7 дней (member/not_member)
+- `kanCategory` — полная иерархия категорий через `parentCategory` recursion (HOME → KAN → ... → leaf)
+- `logging.byPassParamMap.adsClickUrl` — если есть, листинг = реклама
+- `newItem`, `oneYearPurchaseCount`, `lastPurchasedDateUTC`, `salesCount`, `soldOut`, `rocketWowTypes`
+- `pricesByMemberStatus.NOT_MEMBER`:
+  - `SALES.priceEx.amount` + `discountRate` — основная цена
+  - `WOW_MEMBER_PRICE.priceEx.amount` — цена для Wow-подписчиков
+  - `INSTANT_DISCOUNT`, `FINAL_PRICE`, `ANCHOR_PRICE`, `ORIGINAL`, `DOWNLOAD_COUPON_DISCOUNT`
+- `ratingInfo.{ratingAverage, ratingCount, ratingDetails, rawRatingAverage}` — `ratingDetails` это массив `[{count, rating: 1..5}]`
+- `title` — полное название товара (например `"MEOW 고양이스크래쳐 사이잘삼 특대형 스크래처, 1개, NEW해먹(특대)"`)
+- `type` — `"PRODUCT"` для обычных, баннер использует другой формат с `bannerRatingInfo` (rating 0-100 scale)
+
+**Баннер-реклама** (первая позиция, type `ADZERK_KEYWORD`) — плоский формат: `productId`, `title`, `originalPrice`, `salesPrice`, `bannerRatingInfo.ratingAverage` (шкала 0-100, 90 = 4.5★). В текущем парсере не используется (мы фильтруем по `divisionType:GOODS`).
+
+**Что потеряли с RSC-подходом:** хэштеги «이런 점이 좋아요» — они есть только на странице товара `/vp/products/{id}`, не в RSC поиска. Если нужны — добавить отдельный проход по топ-10.
+
+**Что получили:** парс **в 30+ раз быстрее**, ноль шансов попасть под rate-limit, плюс новые поля (SEO-заголовки, топ-ключевик товара, распределение рейтинга по звёздам, фактическая цена транзакции).
 
 **Табы в Google Sheets** (префикс `{sheetName}__`):
 - `__summary` — вердикт 🟢 GO / 🟡 MAYBE / 🔴 SKIP по 5 критериям + метрики
@@ -143,8 +187,21 @@ Workflow:
 - `__reviews` — все отзывы с conditional formatting по рейтингу
 - `__top_reviews` — топ-50 по helpful
 - `__titles` — частые слова в названиях (порог: ≥2 вхождений)
+- `__photos` — все фото отзывов с `=IMAGE(...)` превью (опц.)
+- `__qa` — Q&A (опц., если собрались)
+- `__coupang_tags` — агрегированные «이런 점이 좋아요» хэштеги (опц.)
 - `__pains` — AI: повторяющиеся жалобы с count и цитатами
 - `__positives` — AI: что хвалят с count и цитатами
+- `__pre_fears` — AI: предпокупочные страхи из Q&A (опц.)
+
+**In-app explorer** (`/explorer/[runId]`):
+- Tab Обзор: вердикт + чипы pains/positives (клик → переход в Отзывы с фильтром), pre_fears, метрики, ★-распределение
+- Tab Отзывы: sidebar фильтров (темы / ★ / товар / с фото) + сами отзывы с превью фото
+- Tab Фото: галерея миниатюр всех фото из отзывов
+- Tab Q&A: пары вопрос-ответ + AI-страхи в боковой колонке
+- Tab Товары: per-product breakdown с распределением ★ внутри товара
+- Tab Хэштеги: агрегированные теги от Coupang
+- Внутренняя привязка: AI возвращает `reviewRefs` (1-based индексы в семпле) → API мапит на `reviewId` → клик по теме фильтрует ровно те отзывы
 
 **Логика вердикта** (`computeVerdict` в `sheets-analysis.ts`) — 5 баллов:
 - products ≥ 15
@@ -156,11 +213,11 @@ Workflow:
 
 **CORS для POST с coupang.com на localhost:**
 - Chrome 94+ блокирует public → private network запросы (Private Network Access)
-- Нужен заголовок `Access-Control-Allow-Private-Network: true` на OPTIONS preflight (уже добавлен в `/api/scrape/reviews/route.ts` и `/api/scrape/full/route.ts`)
+- Нужен заголовок `Access-Control-Allow-Private-Network: true` на OPTIONS preflight (уже добавлен в `/api/explorer/full/route.ts` и legacy `/api/scrape/reviews/route.ts`)
 
 **Восстановление при сбое POST:**
-- Скрипт сохраняет данные в `window.__coupangReviews`, `window.__coupangProducts`, `window.__coupangMeta`
-- Из консоли можно вызвать `__retryUpload()` чтобы переотправить без пересбора
+- Скрипт сохраняет данные в `window.__oeData`, `window.__oeMeta`
+- Из консоли можно вызвать `window.__oeRetry()` чтобы переотправить без пересбора
 - Fallback: при ошибке скачивает JSON через `<a download>`
 
 ## Что осталось сделать

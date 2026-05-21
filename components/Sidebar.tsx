@@ -19,7 +19,7 @@ const NAV = [
   { href: '/research', icon: Search, label: 'Категории' },
   { href: '/trends', icon: TrendingUp, label: 'Тренды' },
   { href: '/discover', icon: Compass, label: 'Ниши' },
-  { href: '/scraper', icon: Download, label: 'Скрапер' },
+  { href: '/explorer', icon: Download, label: 'Opportunity Explorer' },
   { href: '/settings', icon: Settings2, label: 'Настройки' },
 ]
 
