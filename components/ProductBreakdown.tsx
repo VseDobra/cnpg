@@ -38,7 +38,7 @@ export default function ProductBreakdown({ data }: { data: ProductStat[] }) {
             </Pie>
             <Tooltip
               contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, fontSize: 12 }}
-              formatter={(v: number) => [`₩${v.toLocaleString()}`, '']}
+              formatter={(v) => [`₩${Number(v ?? 0).toLocaleString()}`, ''] as [string, string]}
             />
           </PieChart>
         </ResponsiveContainer>

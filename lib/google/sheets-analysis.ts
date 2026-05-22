@@ -78,6 +78,15 @@ async function ensureSheet(sheets: sheets_v4.Sheets, spreadsheetId: string, titl
   const existing = meta.data.sheets?.find((s) => s.properties?.title === title)
   if (existing?.properties?.sheetId != null) {
     await sheets.spreadsheets.values.clear({ spreadsheetId, range: `${title}!A1:Z` })
+    // Снимаем merge + conditional formatting со старой версии того же таба
+    const requests: sheets_v4.Schema$Request[] = [
+      { unmergeCells: { range: { sheetId: existing.properties.sheetId } } },
+    ]
+    try {
+      await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } })
+    } catch {
+      /* нечего разъединять — ок */
+    }
     return existing.properties.sheetId
   }
   const res = await sheets.spreadsheets.batchUpdate({
@@ -87,63 +96,24 @@ async function ensureSheet(sheets: sheets_v4.Sheets, spreadsheetId: string, titl
   return res.data.replies?.[0]?.addSheet?.properties?.sheetId ?? 0
 }
 
-async function writeRows(sheets: sheets_v4.Sheets, spreadsheetId: string, title: string, rows: (string | number)[][]) {
-  await sheets.spreadsheets.values.update({
-    spreadsheetId,
-    range: `${title}!A1`,
-    valueInputOption: 'RAW',
-    requestBody: { values: rows },
-  })
+const RATING_COLORS = [
+  { v: 1, c: { red: 0.95, green: 0.55, blue: 0.55 } },
+  { v: 2, c: { red: 0.98, green: 0.75, blue: 0.6 } },
+  { v: 3, c: { red: 1.0, green: 0.95, blue: 0.6 } },
+  { v: 4, c: { red: 0.75, green: 0.95, blue: 0.75 } },
+  { v: 5, c: { red: 0.55, green: 0.9, blue: 0.55 } },
+]
+
+interface Section {
+  bannerRow: number
+  headerRow: number
+  headerCols: number
+  dataStartRow: number
+  dataEndRow: number
+  ratingCol?: number
 }
 
-async function applyFormatting(sheets: sheets_v4.Sheets, spreadsheetId: string, sheetId: number, opts: { headerCols: number; frozenRows?: number; ratingCol?: number }) {
-  const requests: sheets_v4.Schema$Request[] = [
-    // Bold header
-    {
-      repeatCell: {
-        range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: opts.headerCols },
-        cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: { red: 0.18, green: 0.2, blue: 0.27 }, horizontalAlignment: 'CENTER' } },
-        fields: 'userEnteredFormat(textFormat,backgroundColor,horizontalAlignment)',
-      },
-    },
-    // Freeze header
-    {
-      updateSheetProperties: {
-        properties: { sheetId, gridProperties: { frozenRowCount: opts.frozenRows ?? 1 } },
-        fields: 'gridProperties.frozenRowCount',
-      },
-    },
-    // Basic filter
-    {
-      setBasicFilter: {
-        filter: { range: { sheetId, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: opts.headerCols } },
-      },
-    },
-  ]
-  // Rating colors (1=red ... 5=green)
-  if (opts.ratingCol != null) {
-    const ratingCol = opts.ratingCol
-    const colors = [
-      { v: 1, c: { red: 0.95, green: 0.55, blue: 0.55 } },
-      { v: 2, c: { red: 0.98, green: 0.75, blue: 0.6 } },
-      { v: 3, c: { red: 1.0, green: 0.95, blue: 0.6 } },
-      { v: 4, c: { red: 0.75, green: 0.95, blue: 0.75 } },
-      { v: 5, c: { red: 0.55, green: 0.9, blue: 0.55 } },
-    ]
-    for (const { v, c } of colors) {
-      requests.push({
-        addConditionalFormatRule: {
-          rule: {
-            ranges: [{ sheetId, startRowIndex: 1, startColumnIndex: ratingCol, endColumnIndex: ratingCol + 1 }],
-            booleanRule: { condition: { type: 'NUMBER_EQ', values: [{ userEnteredValue: String(v) }] }, format: { backgroundColor: c } },
-          },
-          index: 0,
-        },
-      })
-    }
-  }
-  await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } })
-}
+const MAX_COL = 16
 
 export async function writeNicheAnalysis(
   spreadsheetId: string,
@@ -159,207 +129,133 @@ export async function writeNicheAnalysis(
   const questions = data.questions ?? []
   const searchVolume = data.searchVolume ?? null
   const verdict = computeVerdict(products, reviews)
-
-  // 1) SUMMARY (главный таб)
-  const summaryTab = `${baseName}__summary`
-  const summarySheetId = await ensureSheet(sheets, spreadsheetId, summaryTab)
   const m = verdict.metrics
-  const summaryRows: (string | number)[][] = [
-    ['Ниша', data.keyword ?? ''],
-    ['Дата', new Date().toISOString().slice(0, 10)],
-    [],
-    ['ВЕРДИКТ', verdict.text],
-    [],
-    ['Метрика', 'Значение'],
-    ['Активных листингов', m.products],
-    ['Уникальных продавцов', m.sellers],
-    ['Медиана цены, ₩', m.medianPrice],
-    ['Средний рейтинг', m.avgRating],
-    ['Медиана отзывов на товар', m.medianReviewCount],
-    ['Всего собрано отзывов', m.totalReviewsCollected],
-    ['Доля негатива (1-2★), %', m.negativeShare],
-    ['Концентрация ТОП-3, %', m.top3Concentration],
-    ['Доля Rocket-доставки, %', m.rocketShare],
-  ]
-  if (searchVolume) {
-    summaryRows.push(
-      ['Naver: запросов/мес (seed)', searchVolume.seedMonthlyTotal],
-      ['Naver: конкуренция (seed)', searchVolume.seedCompetition],
-      ['Naver: глубина рекламы (seed)', searchVolume.seedAdDepth],
-      ['Naver: связанных ключей', searchVolume.relatedCount],
-      ['Naver: суммарный спрос экосистемы', searchVolume.totalEcosystemSearches],
-    )
-  }
-  summaryRows.push([], ['Обоснование'], ...verdict.reasons.map((r) => [r]))
-  await writeRows(sheets, spreadsheetId, summaryTab, summaryRows)
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId,
-    requestBody: {
-      requests: [
-        {
-          repeatCell: {
-            range: { sheetId: summarySheetId, startRowIndex: 3, endRowIndex: 4, startColumnIndex: 0, endColumnIndex: 2 },
-            cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 14 }, backgroundColor: { red: 0.95, green: 0.95, blue: 0.6 } } },
-            fields: 'userEnteredFormat(textFormat,backgroundColor)',
-          },
-        },
-        {
-          repeatCell: {
-            range: { sheetId: summarySheetId, startRowIndex: 5, endRowIndex: 6, startColumnIndex: 0, endColumnIndex: 2 },
-            cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: { red: 0.85, green: 0.9, blue: 0.95 } } },
-            fields: 'userEnteredFormat(textFormat,backgroundColor)',
-          },
-        },
-        {
-          updateDimensionProperties: {
-            range: { sheetId: summarySheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 },
-            properties: { pixelSize: 250 },
-            fields: 'pixelSize',
-          },
-        },
-      ],
-    },
-  })
 
-  // 2) PRODUCTS — карточки конкурентов
-  const productsTab = `${baseName}__products`
-  const productsSheetId = await ensureSheet(sheets, spreadsheetId, productsTab)
+  // ============ MAIN REPORT TAB ============
+  const reportTab = baseName
+  const reportSheetId = await ensureSheet(sheets, spreadsheetId, reportTab)
+
+  const rows: (string | number)[][] = []
+  const sections: Section[] = []
+
+  // --- Header rows ---
+  rows.push(['Ниша', data.keyword ?? ''])
+  rows.push(['Дата', new Date().toISOString().slice(0, 10)])
+  rows.push([])
+  const verdictRow = rows.length
+  rows.push([verdict.text])
+  rows.push([])
+
+  // --- Метрики ---
+  let bannerRow = rows.length
+  rows.push(['МЕТРИКИ'])
+  let headerRow = rows.length
+  rows.push(['Метрика', 'Значение'])
+  let dataStart = rows.length
+  rows.push(['Активных листингов', m.products])
+  rows.push(['Уникальных продавцов', m.sellers])
+  rows.push(['Медиана цены, ₩', m.medianPrice])
+  rows.push(['Средний рейтинг', m.avgRating])
+  rows.push(['Медиана отзывов на товар', m.medianReviewCount])
+  rows.push(['Всего собрано отзывов', m.totalReviewsCollected])
+  rows.push(['Доля негатива (1-2★), %', m.negativeShare])
+  rows.push(['Концентрация ТОП-3, %', m.top3Concentration])
+  rows.push(['Доля Rocket-доставки, %', m.rocketShare])
+  if (searchVolume) {
+    rows.push(['Naver: запросов/мес (seed)', searchVolume.seedMonthlyTotal])
+    rows.push(['Naver: конкуренция (seed)', searchVolume.seedCompetition])
+    rows.push(['Naver: глубина рекламы (seed)', searchVolume.seedAdDepth])
+    rows.push(['Naver: связанных ключей', searchVolume.relatedCount])
+    rows.push(['Naver: суммарный спрос экосистемы', searchVolume.totalEcosystemSearches])
+  }
+  sections.push({ bannerRow, headerRow, headerCols: 2, dataStartRow: dataStart, dataEndRow: rows.length })
+  rows.push([])
+
+  // --- Обоснование ---
+  bannerRow = rows.length
+  rows.push(['ОБОСНОВАНИЕ'])
+  dataStart = rows.length
+  for (const r of verdict.reasons) rows.push([r])
+  sections.push({ bannerRow, headerRow: -1, headerCols: 1, dataStartRow: dataStart, dataEndRow: rows.length })
+  rows.push([])
+
+  // --- Товары ---
+  bannerRow = rows.length
+  rows.push([`ТОВАРЫ (${products.length})`])
+  headerRow = rows.length
   const productsHeaders = ['productId', 'name', 'price', 'originalPrice', 'discountPct', 'couponDiscount', 'rating', 'reviewCount', 'imageCount', 'isRocket', 'isWow', 'recentBuyers', 'seller', 'category', 'firstImage', 'url']
-  const productsRows: (string | number)[][] = [
-    productsHeaders,
-    ...products.map((p) => [
+  rows.push(productsHeaders)
+  dataStart = rows.length
+  for (const p of products) {
+    rows.push([
       p.productId, p.name, p.price, p.originalPrice, p.discountPct, p.couponDiscount,
       p.rating, p.reviewCount, p.imageCount,
       p.isRocket ? 'Y' : 'N', p.isWow ? 'Y' : 'N',
       p.recentBuyers ?? '', p.seller, p.category, p.firstImage, p.url,
-    ]),
-  ]
-  await writeRows(sheets, spreadsheetId, productsTab, productsRows)
-  await applyFormatting(sheets, spreadsheetId, productsSheetId, { headerCols: productsHeaders.length, ratingCol: 6 })
+    ])
+  }
+  sections.push({ bannerRow, headerRow, headerCols: productsHeaders.length, dataStartRow: dataStart, dataEndRow: rows.length, ratingCol: 6 })
+  rows.push([])
 
-  // 3) REVIEWS — все отзывы
-  const reviewsTab = `${baseName}__reviews`
-  const reviewsSheetId = await ensureSheet(sheets, spreadsheetId, reviewsTab)
-  const reviewsHeaders = ['productId', 'productName', 'reviewId', 'rating', 'date', 'reviewer', 'helpful', 'title', 'content']
-  const reviewsRows: (string | number)[][] = [
-    reviewsHeaders,
-    ...reviews.map((r) => [
-      r.productId, r.productName, String(r.reviewId), r.rating, r.date, r.reviewer, r.helpful, r.title, r.content,
-    ]),
-  ]
-  await writeRows(sheets, spreadsheetId, reviewsTab, reviewsRows)
-  await applyFormatting(sheets, spreadsheetId, reviewsSheetId, { headerCols: reviewsHeaders.length, ratingCol: 3 })
-
-  // 4) TOP REVIEWS — топ-50 по helpful
-  const topTab = `${baseName}__top_reviews`
-  const topSheetId = await ensureSheet(sheets, spreadsheetId, topTab)
+  // --- TOP-50 отзывов ---
   const topReviews = [...reviews].sort((a, b) => (b.helpful || 0) - (a.helpful || 0)).slice(0, 50)
-  const topRows: (string | number)[][] = [
-    reviewsHeaders,
-    ...topReviews.map((r) => [
-      r.productId, r.productName, String(r.reviewId), r.rating, r.date, r.reviewer, r.helpful, r.title, r.content,
-    ]),
-  ]
-  await writeRows(sheets, spreadsheetId, topTab, topRows)
-  await applyFormatting(sheets, spreadsheetId, topSheetId, { headerCols: reviewsHeaders.length, ratingCol: 3 })
-
-  // 5) TITLE PATTERNS — частые слова
-  const titlesTab = `${baseName}__titles`
-  const titlesSheetId = await ensureSheet(sheets, spreadsheetId, titlesTab)
-  const wf = titleWordFrequency(products)
-  const titleRows: (string | number)[][] = [['слово', 'встречается'], ...wf]
-  await writeRows(sheets, spreadsheetId, titlesTab, titleRows)
-  await applyFormatting(sheets, spreadsheetId, titlesSheetId, { headerCols: 2 })
-
-  const writtenTabs = [summaryTab, productsTab, reviewsTab, topTab, titlesTab]
-
-  // 6) PHOTOS — галерея фото из отзывов
-  const reviewsWithPhotos = reviews.filter((r) => r.photos && r.photos.length > 0)
-  if (reviewsWithPhotos.length) {
-    const photosTab = `${baseName}__photos`
-    const photosSheetId = await ensureSheet(sheets, spreadsheetId, photosTab)
-    const photosHeaders = ['productId', 'productName', 'reviewId', 'rating', 'photoUrl', 'preview']
-    const photosRows: (string | number)[][] = [photosHeaders]
-    for (const r of reviewsWithPhotos) {
-      for (const url of r.photos!) {
-        photosRows.push([
-          r.productId,
-          r.productName,
-          String(r.reviewId),
-          r.rating,
-          url,
-          `=IMAGE("${url.replace(/"/g, '')}", 4, 80, 80)`,
-        ])
-      }
+  if (topReviews.length) {
+    bannerRow = rows.length
+    rows.push([`TOP-50 ОТЗЫВОВ (по helpful)`])
+    headerRow = rows.length
+    const reviewsHeaders = ['productId', 'productName', 'reviewId', 'rating', 'date', 'reviewer', 'helpful', 'title', 'content']
+    rows.push(reviewsHeaders)
+    dataStart = rows.length
+    for (const r of topReviews) {
+      rows.push([r.productId, r.productName, String(r.reviewId), r.rating, r.date, r.reviewer, r.helpful, r.title, r.content])
     }
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: `${photosTab}!A1`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: photosRows },
-    })
-    await applyFormatting(sheets, spreadsheetId, photosSheetId, { headerCols: photosHeaders.length, ratingCol: 3 })
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId,
-      requestBody: {
-        requests: [
-          {
-            updateDimensionProperties: {
-              range: { sheetId: photosSheetId, dimension: 'ROWS', startIndex: 1, endIndex: photosRows.length },
-              properties: { pixelSize: 90 },
-              fields: 'pixelSize',
-            },
-          },
-          {
-            updateDimensionProperties: {
-              range: { sheetId: photosSheetId, dimension: 'COLUMNS', startIndex: 5, endIndex: 6 },
-              properties: { pixelSize: 100 },
-              fields: 'pixelSize',
-            },
-          },
-        ],
-      },
-    })
-    writtenTabs.push(photosTab)
+    sections.push({ bannerRow, headerRow, headerCols: reviewsHeaders.length, dataStartRow: dataStart, dataEndRow: rows.length, ratingCol: 3 })
+    rows.push([])
   }
 
-  // 7) Q&A — вопросы покупателей
+  // --- Частые слова ---
+  const wf = titleWordFrequency(products)
+  if (wf.length) {
+    bannerRow = rows.length
+    rows.push([`ЧАСТЫЕ СЛОВА В НАЗВАНИЯХ (${wf.length})`])
+    headerRow = rows.length
+    rows.push(['слово', 'встречается'])
+    dataStart = rows.length
+    for (const [w, n] of wf) rows.push([w, n])
+    sections.push({ bannerRow, headerRow, headerCols: 2, dataStartRow: dataStart, dataEndRow: rows.length })
+    rows.push([])
+  }
+
+  // --- Q&A ---
   if (questions.length) {
-    const qaTab = `${baseName}__qa`
-    const qaSheetId = await ensureSheet(sheets, spreadsheetId, qaTab)
-    const qaHeaders = ['productId', 'askedAt', 'answeredAt', 'question', 'answer']
-    const qaRows: (string | number)[][] = [
-      qaHeaders,
-      ...questions.map((q) => [q.productId, q.askedAt ?? '', q.answeredAt ?? '', q.question, q.answer]),
-    ]
-    await writeRows(sheets, spreadsheetId, qaTab, qaRows)
-    await applyFormatting(sheets, spreadsheetId, qaSheetId, { headerCols: qaHeaders.length })
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId,
-      requestBody: {
-        requests: [
-          {
-            updateDimensionProperties: {
-              range: { sheetId: qaSheetId, dimension: 'COLUMNS', startIndex: 3, endIndex: 5 },
-              properties: { pixelSize: 400 },
-              fields: 'pixelSize',
-            },
-          },
-        ],
-      },
-    })
-    writtenTabs.push(qaTab)
+    bannerRow = rows.length
+    rows.push([`Q&A (${questions.length})`])
+    headerRow = rows.length
+    rows.push(['productId', 'askedAt', 'answeredAt', 'question', 'answer'])
+    dataStart = rows.length
+    for (const q of questions) rows.push([q.productId, q.askedAt ?? '', q.answeredAt ?? '', q.question, q.answer])
+    sections.push({ bannerRow, headerRow, headerCols: 5, dataStartRow: dataStart, dataEndRow: rows.length })
+    rows.push([])
   }
 
-  // 8a) SEARCH VOLUME — Naver Ads (seed + related)
+  // --- Хэштеги Coupang ---
+  if (tags.length) {
+    const tagsAgg = new Map<string, number>()
+    for (const t of tags) tagsAgg.set(t.tag, (tagsAgg.get(t.tag) ?? 0) + t.count)
+    const tagsSorted = [...tagsAgg.entries()].sort((a, b) => b[1] - a[1])
+    bannerRow = rows.length
+    rows.push([`ХЭШТЕГИ COUPANG (${tagsSorted.length})`])
+    headerRow = rows.length
+    rows.push(['тег', 'суммарно по всем товарам'])
+    dataStart = rows.length
+    for (const [t, n] of tagsSorted) rows.push([t, n])
+    sections.push({ bannerRow, headerRow, headerCols: 2, dataStartRow: dataStart, dataEndRow: rows.length })
+    rows.push([])
+  }
+
+  // --- Naver volume ---
   if (searchVolume && (searchVolume.seedMonthlyTotal > 0 || searchVolume.relatedTopN.length)) {
-    const svTab = `${baseName}__search_volume`
-    const svSheetId = await ensureSheet(sheets, spreadsheetId, svTab)
-    const svHeaders = ['ключевик', 'PC/мес', 'mobile/мес', 'всего/мес', 'avg PC клики', 'avg mobile клики', 'CTR PC %', 'CTR mobile %', 'глубина рекламы', 'конкуренция', 'seed?']
-    const seedRow: KeywordStat | undefined = searchVolume.relatedTopN.find(() => false) // placeholder, seed строится отдельно
-    void seedRow
     const allRows: KeywordStat[] = [
-      // seed row first
       {
         keyword: searchVolume.seedKeyword,
         monthlyPc: 0,
@@ -375,9 +271,13 @@ export async function writeNicheAnalysis(
       },
       ...searchVolume.relatedTopN,
     ]
-    const svRows: (string | number)[][] = [
-      svHeaders,
-      ...allRows.map((k) => [
+    bannerRow = rows.length
+    rows.push([`ПОИСКОВЫЙ ОБЪЁМ NAVER (${allRows.length} ключей)`])
+    headerRow = rows.length
+    rows.push(['ключевик', 'PC/мес', 'mobile/мес', 'всего/мес', 'avg PC клики', 'avg mobile клики', 'CTR PC %', 'CTR mobile %', 'глубина рекламы', 'конкуренция', 'seed?'])
+    dataStart = rows.length
+    for (const k of allRows) {
+      rows.push([
         k.keyword,
         k.monthlyPc === -1 ? '<10' : k.monthlyPc,
         k.monthlyMobile === -1 ? '<10' : k.monthlyMobile,
@@ -389,42 +289,189 @@ export async function writeNicheAnalysis(
         k.adDepth,
         k.competition,
         k.isSeed ? 'Y' : '',
-      ]),
-    ]
-    await writeRows(sheets, spreadsheetId, svTab, svRows)
-    await applyFormatting(sheets, spreadsheetId, svSheetId, { headerCols: svHeaders.length })
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId,
-      requestBody: {
-        requests: [
-          {
-            updateDimensionProperties: {
-              range: { sheetId: svSheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 },
-              properties: { pixelSize: 240 },
-              fields: 'pixelSize',
-            },
-          },
-        ],
-      },
-    })
-    writtenTabs.push(svTab)
+      ])
+    }
+    sections.push({ bannerRow, headerRow, headerCols: 11, dataStartRow: dataStart, dataEndRow: rows.length })
+    rows.push([])
   }
 
-  // 8) COUPANG TAGS — агрегированные хэштеги от Coupang
-  if (tags.length) {
-    const tagsAgg = new Map<string, number>()
-    for (const t of tags) tagsAgg.set(t.tag, (tagsAgg.get(t.tag) ?? 0) + t.count)
-    const tagsSorted = [...tagsAgg.entries()].sort((a, b) => b[1] - a[1])
-    const tagsTab = `${baseName}__coupang_tags`
-    const tagsSheetId = await ensureSheet(sheets, spreadsheetId, tagsTab)
-    const tagsRows: (string | number)[][] = [['тег', 'суммарно по всем товарам'], ...tagsSorted]
-    await writeRows(sheets, spreadsheetId, tagsTab, tagsRows)
-    await applyFormatting(sheets, spreadsheetId, tagsSheetId, { headerCols: 2 })
-    writtenTabs.push(tagsTab)
+  // Write report rows in one call
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${reportTab}!A1`,
+    valueInputOption: 'RAW',
+    requestBody: { values: rows },
+  })
+
+  // Build formatting requests
+  const requests: sheets_v4.Schema$Request[] = []
+
+  // Column widths
+  requests.push({
+    updateDimensionProperties: {
+      range: { sheetId: reportSheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 },
+      properties: { pixelSize: 280 },
+      fields: 'pixelSize',
+    },
+  })
+  requests.push({
+    updateDimensionProperties: {
+      range: { sheetId: reportSheetId, dimension: 'COLUMNS', startIndex: 1, endIndex: 2 },
+      properties: { pixelSize: 350 },
+      fields: 'pixelSize',
+    },
+  })
+
+  // Большой вердикт-баннер
+  const verdictBg = verdict.level === 'GO'
+    ? { red: 0.65, green: 0.9, blue: 0.65 }
+    : verdict.level === 'MAYBE'
+      ? { red: 1, green: 0.94, blue: 0.6 }
+      : { red: 1, green: 0.65, blue: 0.65 }
+  requests.push({
+    mergeCells: {
+      range: { sheetId: reportSheetId, startRowIndex: verdictRow, endRowIndex: verdictRow + 1, startColumnIndex: 0, endColumnIndex: MAX_COL },
+      mergeType: 'MERGE_ALL',
+    },
+  })
+  requests.push({
+    repeatCell: {
+      range: { sheetId: reportSheetId, startRowIndex: verdictRow, endRowIndex: verdictRow + 1, startColumnIndex: 0, endColumnIndex: MAX_COL },
+      cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 18 }, backgroundColor: verdictBg, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } },
+      fields: 'userEnteredFormat(textFormat,backgroundColor,horizontalAlignment,verticalAlignment)',
+    },
+  })
+  requests.push({
+    updateDimensionProperties: {
+      range: { sheetId: reportSheetId, dimension: 'ROWS', startIndex: verdictRow, endIndex: verdictRow + 1 },
+      properties: { pixelSize: 50 },
+      fields: 'pixelSize',
+    },
+  })
+
+  // Section banners + table headers + rating colors
+  for (const s of sections) {
+    requests.push({
+      mergeCells: {
+        range: { sheetId: reportSheetId, startRowIndex: s.bannerRow, endRowIndex: s.bannerRow + 1, startColumnIndex: 0, endColumnIndex: MAX_COL },
+        mergeType: 'MERGE_ALL',
+      },
+    })
+    requests.push({
+      repeatCell: {
+        range: { sheetId: reportSheetId, startRowIndex: s.bannerRow, endRowIndex: s.bannerRow + 1, startColumnIndex: 0, endColumnIndex: MAX_COL },
+        cell: {
+          userEnteredFormat: {
+            textFormat: { bold: true, fontSize: 12, foregroundColor: { red: 1, green: 1, blue: 1 } },
+            backgroundColor: { red: 0.2, green: 0.25, blue: 0.32 },
+            horizontalAlignment: 'LEFT',
+            verticalAlignment: 'MIDDLE',
+            padding: { top: 4, bottom: 4, left: 8, right: 4 },
+          },
+        },
+        fields: 'userEnteredFormat(textFormat,backgroundColor,horizontalAlignment,verticalAlignment,padding)',
+      },
+    })
+
+    if (s.headerRow >= 0) {
+      requests.push({
+        repeatCell: {
+          range: { sheetId: reportSheetId, startRowIndex: s.headerRow, endRowIndex: s.headerRow + 1, startColumnIndex: 0, endColumnIndex: s.headerCols },
+          cell: { userEnteredFormat: { textFormat: { bold: true }, backgroundColor: { red: 0.92, green: 0.93, blue: 0.96 }, horizontalAlignment: 'CENTER' } },
+          fields: 'userEnteredFormat(textFormat,backgroundColor,horizontalAlignment)',
+        },
+      })
+    }
+
+    if (s.ratingCol != null && s.dataEndRow > s.dataStartRow) {
+      for (const { v, c } of RATING_COLORS) {
+        requests.push({
+          addConditionalFormatRule: {
+            rule: {
+              ranges: [{ sheetId: reportSheetId, startRowIndex: s.dataStartRow, endRowIndex: s.dataEndRow, startColumnIndex: s.ratingCol, endColumnIndex: s.ratingCol + 1 }],
+              booleanRule: { condition: { type: 'NUMBER_EQ', values: [{ userEnteredValue: String(v) }] }, format: { backgroundColor: c } },
+            },
+            index: 0,
+          },
+        })
+      }
+    }
+  }
+
+  // Freeze шапки (ниша + дата + blank + вердикт + blank)
+  requests.push({
+    updateSheetProperties: {
+      properties: { sheetId: reportSheetId, gridProperties: { frozenRowCount: 5 } },
+      fields: 'gridProperties.frozenRowCount',
+    },
+  })
+
+  await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } })
+
+  // ============ FULL REVIEWS TAB ============
+  const reviewsTab = `${baseName}__reviews_all`
+  const reviewsSheetId = await ensureSheet(sheets, spreadsheetId, reviewsTab)
+  const reviewsHeaders = ['productId', 'productName', 'reviewId', 'rating', 'date', 'reviewer', 'helpful', 'title', 'content']
+  const reviewsRows: (string | number)[][] = [
+    reviewsHeaders,
+    ...reviews.map((r) => [r.productId, r.productName, String(r.reviewId), r.rating, r.date, r.reviewer, r.helpful, r.title, r.content]),
+  ]
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${reviewsTab}!A1`,
+    valueInputOption: 'RAW',
+    requestBody: { values: reviewsRows },
+  })
+  const reviewsRequests: sheets_v4.Schema$Request[] = [
+    {
+      repeatCell: {
+        range: { sheetId: reviewsSheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: reviewsHeaders.length },
+        cell: { userEnteredFormat: { textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } }, backgroundColor: { red: 0.2, green: 0.25, blue: 0.32 }, horizontalAlignment: 'CENTER' } },
+        fields: 'userEnteredFormat(textFormat,backgroundColor,horizontalAlignment)',
+      },
+    },
+    {
+      updateSheetProperties: {
+        properties: { sheetId: reviewsSheetId, gridProperties: { frozenRowCount: 1 } },
+        fields: 'gridProperties.frozenRowCount',
+      },
+    },
+    {
+      setBasicFilter: {
+        filter: { range: { sheetId: reviewsSheetId, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: reviewsHeaders.length } },
+      },
+    },
+  ]
+  for (const { v, c } of RATING_COLORS) {
+    reviewsRequests.push({
+      addConditionalFormatRule: {
+        rule: {
+          ranges: [{ sheetId: reviewsSheetId, startRowIndex: 1, startColumnIndex: 3, endColumnIndex: 4 }],
+          booleanRule: { condition: { type: 'NUMBER_EQ', values: [{ userEnteredValue: String(v) }] }, format: { backgroundColor: c } },
+        },
+        index: 0,
+      },
+    })
+  }
+  await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: reviewsRequests } })
+
+  // ============ удалить старые табы (8-табов-схема) того же baseName ============
+  const oldSuffixes = ['__summary', '__products', '__reviews', '__top_reviews', '__titles', '__photos', '__qa', '__coupang_tags', '__search_volume']
+  const meta = await sheets.spreadsheets.get({ spreadsheetId })
+  const deleteRequests: sheets_v4.Schema$Request[] = []
+  for (const sh of meta.data.sheets ?? []) {
+    const title = sh.properties?.title
+    if (!title || sh.properties?.sheetId == null) continue
+    if (oldSuffixes.some((suf) => title === baseName + suf)) {
+      deleteRequests.push({ deleteSheet: { sheetId: sh.properties.sheetId } })
+    }
+  }
+  if (deleteRequests.length) {
+    await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: deleteRequests } })
   }
 
   return {
-    tabs: writtenTabs,
+    tabs: [reportTab, reviewsTab],
     verdict,
   }
 }

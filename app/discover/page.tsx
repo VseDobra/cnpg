@@ -621,7 +621,7 @@ export default function DiscoverPage() {
                       <Tooltip
                         contentStyle={{ background: '#12141f', border: '1px solid #2d3148', borderRadius: 8, fontSize: 11 }}
                         labelStyle={{ color: '#e2e8f0' }}
-                        formatter={(v: number) => [v, 'Индекс']}
+                        formatter={(v) => [Number(v ?? 0), 'Индекс'] as [number, string]}
                       />
                       <Line type="monotone" dataKey="ratio" stroke="#6366f1" strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
                     </LineChart>

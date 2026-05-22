@@ -38,9 +38,9 @@ export default function OrdersPage() {
           couponsResults.push(Array.isArray(cs) ? cs : [])
         }
         setOrders(rows.map((o, i) => {
-          const cs = couponsResults[i]
+          const cs = couponsResults[i] as { couponId: number; type: string; discount: number }[]
           const unique: { type: string; discount: number }[] = Array.from(
-            new Map(cs.map((c: { couponId: number; type: string; discount: number }) => [c.couponId, c])).values()
+            new Map(cs.map((c) => [c.couponId, c])).values()
           )
           const discount = unique.reduce((sum, c) => {
             if (c.type === 'RATE') return sum

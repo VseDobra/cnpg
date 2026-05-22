@@ -17,11 +17,44 @@ interface RunDetail {
   productCount: number
   searchVolume: SearchVolumeSummary | null
   aiExtended: ExtendedAnalysis | null
+  visionInsights: VisionInsights | null
+  listingDraft: ListingDraft | null
+  naverTrends: NaverTrendsResult | null
   products: ProductRow[]
   reviews: ReviewRow[]
   questions: QuestionRow[]
   tags: TagRow[]
   topics: TopicRow[]
+}
+
+interface VisionInsights {
+  totalPhotosAnalyzed: number
+  useCases: { context: string; share: string; description: string; count: number }[]
+  commonDefects: { defect: string; severity: 'critical' | 'major' | 'minor'; mentions: number; description: string }[]
+  photoOpportunities: { opportunity: string; why: string; priority: 'high' | 'medium' | 'low' }[]
+  buyerProfile: string
+  generatedAt: string
+}
+
+interface ListingDraft {
+  koreanTitle: string
+  ruTranslationOfTitle: string
+  bullets: { ko: string; ru: string; addresses: string }[]
+  description: { ko: string; ru: string }
+  pricingSuggestion: { recommended: number; reasoning: string }
+  imagesChecklist: string[]
+  positioning: string
+  generatedAt: string
+}
+
+interface NaverTrendsResult {
+  keyword: string
+  points: { period: string; ratio: number }[]
+  peakMonth: { period: string; ratio: number } | null
+  troughMonth: { period: string; ratio: number } | null
+  seasonality: 'highly_seasonal' | 'seasonal' | 'stable' | 'unknown'
+  yoyChange: number | null
+  generatedAt: string
 }
 
 interface SearchVolumeSummary {
@@ -126,6 +159,45 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
   const [productFilter, setProductFilter] = useState<string | null>(null)
   const [withPhotosOnly, setWithPhotosOnly] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
+  const [reanalyzing, setReanalyzing] = useState(false)
+  const [reanalyzeError, setReanalyzeError] = useState<string | null>(null)
+  const [visionRunning, setVisionRunning] = useState(false)
+  const [visionError, setVisionError] = useState<string | null>(null)
+  const [listingRunning, setListingRunning] = useState(false)
+  const [listingError, setListingError] = useState<string | null>(null)
+  const [trendsRunning, setTrendsRunning] = useState(false)
+  const [trendsError, setTrendsError] = useState<string | null>(null)
+
+  const callApi = async (
+    path: string,
+    setRunning: (b: boolean) => void,
+    setError: (e: string | null) => void,
+  ) => {
+    setRunning(true)
+    setError(null)
+    try {
+      const r = await fetch(path, { method: 'POST' })
+      if (!r.ok) {
+        const txt = await r.text()
+        let msg = txt
+        try {
+          const j = JSON.parse(txt)
+          msg = j.error || txt
+        } catch {}
+        throw new Error(msg || `HTTP ${r.status}`)
+      }
+      const fresh = await fetch(`/api/explorer/runs/${id}`).then((x) => x.json())
+      setRun(fresh)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRunning(false)
+    }
+  }
+  const runReanalyze = () => callApi(`/api/explorer/runs/${id}/reanalyze`, setReanalyzing, setReanalyzeError)
+  const runVision = () => callApi(`/api/explorer/runs/${id}/vision`, setVisionRunning, setVisionError)
+  const runListing = () => callApi(`/api/explorer/runs/${id}/listing-draft`, setListingRunning, setListingError)
+  const runTrends = () => callApi(`/api/explorer/runs/${id}/trends`, setTrendsRunning, setTrendsError)
 
   useEffect(() => {
     setLoading(true)
@@ -355,10 +427,25 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
             metrics={effectiveMetrics}
             reasons={effectiveReasons}
             categoryFilter={categoryFilter}
+            categoryProducts={categoryProducts}
+            categoryReviews={categoryReviews}
             onPickTopic={(t) => {
               setTopicFilter(t)
               setTab('reviews')
             }}
+            onOpenDemand={() => setTab('demand')}
+            onReanalyze={runReanalyze}
+            reanalyzing={reanalyzing}
+            reanalyzeError={reanalyzeError}
+            onRunVision={runVision}
+            visionRunning={visionRunning}
+            visionError={visionError}
+            onRunListing={runListing}
+            listingRunning={listingRunning}
+            listingError={listingError}
+            onRunTrends={runTrends}
+            trendsRunning={trendsRunning}
+            trendsError={trendsError}
           />
         )}
 
@@ -432,7 +519,11 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
 }
 
 function OverviewTab({
-  run, pains, positives, fears, ratingDist, verdictText, metrics, reasons, categoryFilter, onPickTopic,
+  run, pains, positives, fears, ratingDist, verdictText, metrics, reasons, categoryFilter,
+  categoryProducts, categoryReviews, onPickTopic, onOpenDemand, onReanalyze, reanalyzing, reanalyzeError,
+  onRunVision, visionRunning, visionError,
+  onRunListing, listingRunning, listingError,
+  onRunTrends, trendsRunning, trendsError,
 }: {
   run: RunDetail
   pains: TopicRow[]
@@ -443,9 +534,26 @@ function OverviewTab({
   metrics: Record<string, number | string>
   reasons: string[]
   categoryFilter: string | null
+  categoryProducts: ProductRow[]
+  categoryReviews: ReviewRow[]
   onPickTopic: (t: TopicRow) => void
+  onOpenDemand: () => void
+  onReanalyze: () => void
+  reanalyzing: boolean
+  reanalyzeError: string | null
+  onRunVision: () => void
+  visionRunning: boolean
+  visionError: string | null
+  onRunListing: () => void
+  listingRunning: boolean
+  listingError: string | null
+  onRunTrends: () => void
+  trendsRunning: boolean
+  trendsError: string | null
 }) {
+  const hasPhotos = categoryReviews.some((r) => r.photos && r.photos.length > 0)
   const total = ratingDist.reduce((s, n) => s + n, 0) || 1
+  const aiRan = pains.length > 0 || positives.length > 0
   return (
     <div className="grid grid-cols-3 gap-6">
       <div className="col-span-2 space-y-6">
@@ -458,44 +566,44 @@ function OverviewTab({
           </div>
         )}
 
-        {run.searchVolume && (
-          <Card title="Спрос на Naver" subtitle="реальный объём поиска по ключевику" accent="cyan">
-            <div className="grid grid-cols-4 gap-4 mb-2">
-              <BigMetric label="Запросов/мес (seed)" value={run.searchVolume.seedMonthlyTotal.toLocaleString()} />
-              <BigMetric label="Конкуренция" value={competitionLabel(run.searchVolume.seedCompetition)} />
-              <BigMetric label="Глубина рекламы" value={`${run.searchVolume.seedAdDepth}/10`} />
-              <BigMetric label="Связанных ключей" value={run.searchVolume.relatedCount.toString()} />
-            </div>
-            <p className="text-xs text-slate-500">
-              Суммарный спрос всей экосистемы: <strong className="text-slate-300">{run.searchVolume.totalEcosystemSearches.toLocaleString()}</strong> запросов/мес.
-              Подробности в вкладке «Спрос».
-            </p>
+        {run.searchVolume && <KeywordTailPreview sv={run.searchVolume} onOpen={onOpenDemand} />}
+
+        {!aiRan && (
+          <AIEmptyCallout
+            hasReviews={categoryReviews.length >= 10}
+            onRun={onReanalyze}
+            running={reanalyzing}
+            error={reanalyzeError}
+          />
+        )}
+
+        {aiRan && (
+          <Card title="Боль клиентов" subtitle="клик → отзывы с этой темой" accent="red">
+            {pains.length === 0 ? (
+              <Empty>В этом срезе нет pain-тем.</Empty>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {pains.map((t) => (
+                  <TopicChip key={t.id} topic={t} variant="pain" onClick={() => onPickTopic(t)} />
+                ))}
+              </div>
+            )}
           </Card>
         )}
 
-        <Card title="Боль клиентов" subtitle="клик → отзывы с этой темой" accent="red">
-          {pains.length === 0 ? (
-            <Empty>AI ещё не размечал. Нужен повторный прогон с ≥10 отзывами.</Empty>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {pains.map((t) => (
-                <TopicChip key={t.id} topic={t} variant="pain" onClick={() => onPickTopic(t)} />
-              ))}
-            </div>
-          )}
-        </Card>
-
-        <Card title="Что хвалят" subtitle="клик → отзывы" accent="green">
-          {positives.length === 0 ? (
-            <Empty>AI ещё не размечал.</Empty>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {positives.map((t) => (
-                <TopicChip key={t.id} topic={t} variant="positive" onClick={() => onPickTopic(t)} />
-              ))}
-            </div>
-          )}
-        </Card>
+        {aiRan && (
+          <Card title="Что хвалят" subtitle="клик → отзывы" accent="green">
+            {positives.length === 0 ? (
+              <Empty>В этом срезе нет positive-тем.</Empty>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {positives.map((t) => (
+                  <TopicChip key={t.id} topic={t} variant="positive" onClick={() => onPickTopic(t)} />
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
 
         {fears.length > 0 && (
           <Card title="Страхи до покупки" subtitle="из Q&A — что сомневаются покупатели" accent="amber">
@@ -529,6 +637,30 @@ function OverviewTab({
             </ul>
           </Card>
         )}
+
+        <ReviewVelocity reviews={categoryReviews} />
+
+        <CompetitiveMap products={categoryProducts} />
+
+        <TopLeadersBreakdown products={categoryProducts} reviews={categoryReviews} />
+
+        <VulnerabilityScores products={categoryProducts} reviews={categoryReviews} />
+
+        <UnitEconomics products={categoryProducts} />
+
+        <PriceTiersAndTitles products={categoryProducts} />
+
+        <NaverTrendsCard nt={run.naverTrends} running={trendsRunning} error={trendsError} onRun={onRunTrends} />
+
+        <VisionInsightsCard
+          vi={run.visionInsights}
+          running={visionRunning}
+          error={visionError}
+          hasPhotos={hasPhotos}
+          onRun={onRunVision}
+        />
+
+        <ListingDraftCard ld={run.listingDraft} running={listingRunning} error={listingError} onRun={onRunListing} />
 
         <Card title="Обоснование вердикта">
           <ul className="space-y-1 text-sm text-slate-300">
@@ -1162,6 +1294,1155 @@ function TagsTab({ tags }: { tags: TagRow[]; productMap: Map<string, ProductRow>
         (показано {aggregated.length} уникальных тегов; сырых записей {tags.length})
       </div>
     </div>
+  )
+}
+
+// ============ New analytics blocks ============
+
+function CompetitiveMap({ products }: { products: ProductRow[] }) {
+  const valid = products.filter((p) => p.price > 0 && p.rating > 0)
+  if (valid.length < 3) return null
+
+  const prices = valid.map((p) => p.price)
+  const minP = Math.min(...prices)
+  const maxP = Math.max(...prices)
+  const maxReviews = Math.max(...valid.map((p) => p.reviewCount), 1)
+  const sortedPrices = [...prices].sort((a, b) => a - b)
+  const medPrice = sortedPrices[Math.floor(sortedPrices.length / 2)]
+
+  const W = 720, H = 380, padL = 50, padR = 20, padT = 20, padB = 40
+  const plotW = W - padL - padR
+  const plotH = H - padT - padB
+  const logMin = Math.log10(Math.max(minP, 100))
+  const logMax = Math.log10(Math.max(maxP, minP + 1))
+  const xOf = (price: number) =>
+    padL + ((Math.log10(Math.max(price, 100)) - logMin) / Math.max(logMax - logMin, 0.001)) * plotW
+  const yOf = (rating: number) => padT + plotH - ((Math.max(1, Math.min(5, rating)) - 1) / 4) * plotH
+  const rOf = (rc: number) => 4 + Math.sqrt(rc / maxReviews) * 22
+
+  const quadrants = {
+    premium_high: valid.filter((p) => p.price >= medPrice && p.rating >= 4.5).length,
+    premium_low: valid.filter((p) => p.price >= medPrice && p.rating < 4.5).length,
+    budget_high: valid.filter((p) => p.price < medPrice && p.rating >= 4.5).length,
+    budget_low: valid.filter((p) => p.price < medPrice && p.rating < 4.5).length,
+  }
+  const quadName: Record<string, string> = {
+    premium_high: 'премиум + высокий рейтинг',
+    premium_low: 'премиум + слабый рейтинг',
+    budget_high: 'бюджет + высокий рейтинг',
+    budget_low: 'бюджет + слабый рейтинг',
+  }
+  const sortedQ = Object.entries(quadrants).sort((a, b) => a[1] - b[1])
+  const emptiest = sortedQ[0]
+  const opportunityNote =
+    emptiest[1] <= Math.max(1, Math.floor(valid.length * 0.1))
+      ? `Дыра: «${quadName[emptiest[0]]}» — ${emptiest[1]} конкурент${emptiest[1] === 1 ? '' : 'ов'}. Возможный заход.`
+      : `Все 4 квадранта заполнены — нет очевидной пустой ниши.`
+
+  const xTicks = [minP, Math.round(Math.sqrt(minP * maxP)), maxP]
+  const yTicks = [1, 2, 3, 4, 5]
+
+  return (
+    <Card title="Конкурентная карта" subtitle="цена × рейтинг × объём отзывов (лог-шкала цены)" accent="cyan">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+        <line x1={padL} y1={padT + plotH} x2={padL + plotW} y2={padT + plotH} stroke="#334155" />
+        <line x1={padL} y1={padT} x2={padL} y2={padT + plotH} stroke="#334155" />
+        <line x1={xOf(medPrice)} y1={padT} x2={xOf(medPrice)} y2={padT + plotH} stroke="#475569" strokeDasharray="3 3" />
+        <text x={xOf(medPrice) + 4} y={padT + 10} fill="#64748b" fontSize="9">
+          медиана цены
+        </text>
+        <line x1={padL} y1={yOf(4.5)} x2={padL + plotW} y2={yOf(4.5)} stroke="#475569" strokeDasharray="3 3" />
+        <text x={padL + 4} y={yOf(4.5) - 3} fill="#64748b" fontSize="9">
+          4.5★
+        </text>
+        {xTicks.map((p, i) => (
+          <text key={i} x={xOf(p)} y={padT + plotH + 15} fill="#94a3b8" fontSize="10" textAnchor="middle">
+            {p.toLocaleString()}₩
+          </text>
+        ))}
+        {yTicks.map((r, i) => (
+          <text key={i} x={padL - 6} y={yOf(r) + 3} fill="#94a3b8" fontSize="10" textAnchor="end">
+            {r}★
+          </text>
+        ))}
+        {valid.map((p) => {
+          const fill = p.isRocket ? 'rgba(34,211,238,0.35)' : 'rgba(148,163,184,0.30)'
+          const stroke = p.isRocket ? '#22d3ee' : '#94a3b8'
+          return (
+            <circle
+              key={p.productId}
+              cx={xOf(p.price)}
+              cy={yOf(p.rating)}
+              r={rOf(p.reviewCount)}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth="1"
+            >
+              <title>{`${p.name}\n${p.price.toLocaleString()}₩ · ★${p.rating} · ${p.reviewCount.toLocaleString()} отз.${
+                p.isRocket ? ' · Rocket' : ''
+              }`}</title>
+            </circle>
+          )
+        })}
+      </svg>
+      <div className="text-xs text-slate-400 mt-3 flex items-start gap-2">
+        <span className="text-amber-400 shrink-0">💡</span>
+        <span>{opportunityNote}</span>
+      </div>
+      <div className="text-[10px] text-slate-500 mt-1 flex gap-4 flex-wrap">
+        <span>
+          <span className="inline-block w-2.5 h-2.5 rounded-full bg-cyan-400/40 border border-cyan-400 mr-1" />
+          Rocket
+        </span>
+        <span>
+          <span className="inline-block w-2.5 h-2.5 rounded-full bg-slate-400/30 border border-slate-400 mr-1" />
+          Seller-shipped
+        </span>
+        <span>размер ∝ кол-ву отзывов</span>
+      </div>
+    </Card>
+  )
+}
+
+function TopLeadersBreakdown({ products, reviews }: { products: ProductRow[]; reviews: ReviewRow[] }) {
+  const top = useMemo(
+    () => [...products].sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 3),
+    [products],
+  )
+  const reviewsByProduct = useMemo(() => {
+    const m = new Map<string, ReviewRow[]>()
+    for (const r of reviews) {
+      if (!m.has(r.productId)) m.set(r.productId, [])
+      m.get(r.productId)!.push(r)
+    }
+    return m
+  }, [reviews])
+
+  if (top.length === 0) return null
+
+  const totalReviews = products.reduce((s, p) => s + p.reviewCount, 0) || 1
+  const sortedPrices = products.map((p) => p.price).filter((p) => p > 0).sort((a, b) => a - b)
+  const medianPrice = sortedPrices[Math.floor(sortedPrices.length / 2)] || 0
+
+  return (
+    <Card title="Анатомия топ-3 лидеров" subtitle="у кого сейчас рынок и где они уязвимы" accent="cyan">
+      <div className="space-y-4">
+        {top.map((p, idx) => {
+          const rs = reviewsByProduct.get(p.productId) ?? []
+          const negs = rs
+            .filter((r) => r.rating <= 3)
+            .sort((a, b) => b.helpful - a.helpful)
+            .slice(0, 2)
+          const poss = rs
+            .filter((r) => r.rating >= 4)
+            .sort((a, b) => b.helpful - a.helpful)
+            .slice(0, 2)
+          const share = ((p.reviewCount / totalReviews) * 100).toFixed(1)
+          const priceVsMed =
+            p.price && medianPrice ? Math.round(((p.price - medianPrice) / medianPrice) * 100) : null
+          return (
+            <div key={p.productId} className="bg-slate-900 rounded-lg p-4">
+              <div className="flex items-start gap-4 mb-3">
+                <div className="text-3xl font-black text-cyan-500/40 leading-none w-8 text-center pt-1">
+                  #{idx + 1}
+                </div>
+                {p.firstImage && (
+                  <a href={p.url} target="_blank" rel="noopener" className="shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={p.firstImage}
+                      alt=""
+                      className="w-20 h-20 object-cover rounded border border-slate-800"
+                    />
+                  </a>
+                )}
+                <div className="flex-1 min-w-0">
+                  <a
+                    href={p.url}
+                    target="_blank"
+                    rel="noopener"
+                    className="font-medium text-slate-100 hover:text-cyan-300 line-clamp-2 block"
+                  >
+                    {p.name}
+                  </a>
+                  <div className="flex items-center gap-3 text-xs text-slate-400 mt-1.5 flex-wrap">
+                    <span className="text-slate-100 font-semibold tabular-nums">{p.price.toLocaleString()}₩</span>
+                    {p.discountPct > 0 && <span className="text-emerald-400">−{p.discountPct}%</span>}
+                    <span>
+                      <Stars rating={p.rating} small /> {p.rating}
+                    </span>
+                    <span className="text-slate-500">{p.reviewCount.toLocaleString()} отз.</span>
+                    {p.isRocket && <span className="text-cyan-400">🚀</span>}
+                  </div>
+                  <div className="flex gap-4 mt-2 text-[11px]">
+                    <span className="text-slate-400">
+                      Доля отзывов: <strong className="text-slate-200">{share}%</strong>
+                    </span>
+                    {priceVsMed != null && (
+                      <span className="text-slate-400">
+                        Цена vs медиана:{' '}
+                        <strong className={priceVsMed >= 0 ? 'text-purple-300' : 'text-emerald-300'}>
+                          {priceVsMed >= 0 ? '+' : ''}
+                          {priceVsMed}%
+                        </strong>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {(negs.length > 0 || poss.length > 0) && (
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-red-400 mb-1.5">Слабые места</div>
+                    {negs.length === 0 ? (
+                      <div className="text-slate-500 italic">— нет негативных в выборке —</div>
+                    ) : (
+                      negs.map((r) => (
+                        <div key={r.id} className="text-slate-400 mb-1.5 border-l-2 border-red-500/30 pl-2">
+                          <span className="text-red-300">{r.rating}★</span> {r.content.slice(0, 140)}
+                          {r.content.length > 140 ? '…' : ''}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-emerald-400 mb-1.5">За что любят</div>
+                    {poss.length === 0 ? (
+                      <div className="text-slate-500 italic">— нет положительных в выборке —</div>
+                    ) : (
+                      poss.map((r) => (
+                        <div key={r.id} className="text-slate-400 mb-1.5 border-l-2 border-emerald-500/30 pl-2">
+                          <span className="text-emerald-300">{r.rating}★</span> {r.content.slice(0, 140)}
+                          {r.content.length > 140 ? '…' : ''}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </Card>
+  )
+}
+
+function KeywordTailPreview({ sv, onOpen }: { sv: SearchVolumeSummary; onOpen: () => void }) {
+  if (!sv.relatedTopN.length) {
+    return (
+      <Card title="Спрос на Naver" subtitle="реальный объём поиска" accent="cyan">
+        <div className="grid grid-cols-4 gap-3">
+          <BigMetric label="Запросов/мес" value={sv.seedMonthlyTotal.toLocaleString()} />
+          <BigMetric label="Конкуренция" value={competitionLabel(sv.seedCompetition)} />
+          <BigMetric label="Глубина рекламы" value={`${sv.seedAdDepth}/10`} />
+          <BigMetric label="Экосистема" value={sv.totalEcosystemSearches.toLocaleString()} />
+        </div>
+      </Card>
+    )
+  }
+  const top = sv.relatedTopN.slice(0, 10)
+  const maxVolume = Math.max(...top.map((k) => k.monthlyTotal), sv.seedMonthlyTotal, 1)
+  return (
+    <Card
+      title="Спрос на Naver + топ-10 связанных ключевиков"
+      subtitle="реальный объём поиска и длинный хвост"
+      accent="cyan"
+    >
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <BigMetric label="Seed/мес" value={sv.seedMonthlyTotal.toLocaleString()} />
+        <BigMetric label="Экосистема" value={sv.totalEcosystemSearches.toLocaleString()} />
+        <BigMetric label="Связанных ключей" value={sv.relatedCount.toString()} />
+      </div>
+      <div className="space-y-1">
+        {top.map((k) => {
+          const pct = (k.monthlyTotal / maxVolume) * 100
+          return (
+            <div key={k.keyword} className="flex items-center gap-3 text-xs">
+              <span className="text-slate-200 flex-1 truncate" title={k.keyword}>
+                {k.keyword}
+              </span>
+              <span className="tabular-nums text-slate-400 w-16 text-right">
+                {k.monthlyTotal.toLocaleString()}
+              </span>
+              <div className="w-24 bg-slate-800 rounded h-1.5 shrink-0">
+                <div className="h-full bg-cyan-500 rounded" style={{ width: `${pct}%` }} />
+              </div>
+              <span className="w-12 shrink-0 text-right">
+                <CompetitionPill level={k.competition} />
+              </span>
+            </div>
+          )
+        })}
+      </div>
+      <button onClick={onOpen} className="text-xs text-cyan-400 hover:text-cyan-300 mt-3">
+        Все {sv.relatedCount} ключей в вкладке «Спрос» →
+      </button>
+    </Card>
+  )
+}
+
+const KO_STOPWORDS = new Set([
+  '및', '또는', '그리고', '하지만', '이런', '저런', '그런',
+  '1개', '2개', '3개', '4개', '5개', '1+1', '2+1', '1+2',
+])
+
+function PriceTiersAndTitles({ products }: { products: ProductRow[] }) {
+  const data = useMemo(() => {
+    const prices = products.map((p) => p.price).filter((p) => p > 0).sort((a, b) => a - b)
+    if (prices.length < 3) return null
+
+    const min = prices[0]
+    const max = prices[prices.length - 1]
+    const logMin = Math.log10(Math.max(min, 100))
+    const logMax = Math.log10(Math.max(max, min + 1))
+    const nBins = Math.min(12, Math.max(5, Math.floor(prices.length / 3)))
+    const bins: { lo: number; hi: number; count: number; isCluster: boolean }[] = []
+    for (let i = 0; i < nBins; i++) {
+      const lo = Math.round(Math.pow(10, logMin + ((logMax - logMin) * i) / nBins))
+      const hi = Math.round(Math.pow(10, logMin + ((logMax - logMin) * (i + 1)) / nBins))
+      bins.push({ lo, hi, count: 0, isCluster: false })
+    }
+    for (const p of prices) {
+      const t = Math.max(0.0001, (Math.log10(Math.max(p, 100)) - logMin) / Math.max(logMax - logMin, 0.0001))
+      const idx = Math.min(nBins - 1, Math.floor(t * nBins))
+      bins[idx].count++
+    }
+    const avgPerBin = prices.length / nBins
+    for (const b of bins) if (b.count >= avgPerBin * 1.5) b.isCluster = true
+
+    const p33 = prices[Math.floor(prices.length * 0.33)]
+    const p66 = prices[Math.floor(prices.length * 0.66)]
+    const counts = new Map<string, number>()
+    for (const p of products) {
+      const tokens = (p.name || '')
+        .split(/[\s,，\/·()\[\]+|&·]+/u)
+        .map((t) => t.replace(/[.,;:!?"'`]+$/, '').replace(/^[.,;:!?"'`]+/, ''))
+        .filter((t) => t.length >= 2 && !KO_STOPWORDS.has(t) && !/^\d+$/.test(t))
+      const seen = new Set<string>()
+      for (const t of tokens) {
+        if (seen.has(t)) continue
+        seen.add(t)
+        counts.set(t, (counts.get(t) ?? 0) + 1)
+      }
+    }
+    const topWords = [...counts.entries()]
+      .filter(([, c]) => c >= 2)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 24)
+
+    const maxBinCount = Math.max(...bins.map((b) => b.count), 1)
+    const avgTitleLen =
+      products.reduce((s, p) => s + (p.name?.length || 0), 0) / Math.max(products.length, 1)
+
+    return { bins, p33, p66, topWords, maxBinCount, avgTitleLen }
+  }, [products])
+
+  if (!data) return null
+
+  return (
+    <div className="grid grid-cols-2 gap-6">
+      <Card title="Ценовые тиры" subtitle="распределение цен — где толпа">
+        <div className="flex items-end gap-1 h-32 mb-2">
+          {data.bins.map((b, i) => {
+            const h = (b.count / data.maxBinCount) * 100
+            return (
+              <div
+                key={i}
+                className="flex-1 flex flex-col items-center justify-end gap-1"
+                title={`${b.lo.toLocaleString()}–${b.hi.toLocaleString()}₩ · ${b.count} тов.`}
+              >
+                <div className="text-[9px] text-slate-500 tabular-nums">{b.count || ''}</div>
+                <div
+                  className={`w-full rounded-t ${b.isCluster ? 'bg-amber-500' : 'bg-cyan-600'}`}
+                  style={{ height: `${Math.max(h, b.count > 0 ? 4 : 0)}%` }}
+                />
+              </div>
+            )
+          })}
+        </div>
+        <div className="flex justify-between text-[10px] text-slate-500 tabular-nums mb-3">
+          <span>{data.bins[0].lo.toLocaleString()}₩</span>
+          <span>{data.bins[data.bins.length - 1].hi.toLocaleString()}₩</span>
+        </div>
+        <div className="text-xs text-slate-300 grid grid-cols-3 gap-2 pt-2 border-t border-slate-800">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">Бюджет</div>
+            <div className="font-semibold">≤{data.p33.toLocaleString()}₩</div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">Средний</div>
+            <div className="font-semibold">
+              {data.p33.toLocaleString()}–{data.p66.toLocaleString()}₩
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">Премиум</div>
+            <div className="font-semibold">≥{data.p66.toLocaleString()}₩</div>
+          </div>
+        </div>
+        <div className="text-[10px] text-amber-400/80 mt-2">🟡 кластеры — там толпа конкурентов</div>
+      </Card>
+
+      <Card title="Топ-слова из названий" subtitle="что обязательно в title">
+        {data.topWords.length === 0 ? (
+          <Empty>Слишком мало повторов в названиях.</Empty>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {data.topWords.map(([word, count]) => {
+              const size = count >= 10 ? 'text-base' : count >= 5 ? 'text-sm' : 'text-xs'
+              const intensity = Math.min(1, count / 10)
+              return (
+                <span
+                  key={word}
+                  className={`${size} rounded px-2 py-0.5`}
+                  style={{
+                    background: `rgba(34, 211, 238, ${0.1 + intensity * 0.25})`,
+                    color: `rgba(207, 250, 254, ${0.6 + intensity * 0.4})`,
+                  }}
+                  title={`встречается в ${count} названиях`}
+                >
+                  {word} <span className="opacity-60 tabular-nums">{count}</span>
+                </span>
+              )
+            })}
+          </div>
+        )}
+        <div className="text-[10px] text-slate-500 mt-3">
+          Средняя длина названия: <strong className="text-slate-300">{Math.round(data.avgTitleLen)}</strong>{' '}
+          символов
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+function ReviewVelocity({ reviews }: { reviews: ReviewRow[] }) {
+  const data = useMemo(() => {
+    if (reviews.length < 5) return null
+    const byMonth = new Map<string, number>()
+    for (const r of reviews) {
+      if (!r.reviewedAt || r.reviewedAt.length < 7) continue
+      const ym = r.reviewedAt.slice(0, 7)
+      byMonth.set(ym, (byMonth.get(ym) ?? 0) + 1)
+    }
+    if (byMonth.size < 3) return null
+    const sorted = [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+    // Take last 24 months for the chart
+    const last24 = sorted.slice(-24)
+    const maxCount = Math.max(...last24.map((m) => m[1]), 1)
+    const total = last24.reduce((s, m) => s + m[1], 0)
+    const avgPerMonth = total / last24.length
+    // Last 3 months vs prior 3 months
+    const tail = last24.slice(-3).reduce((s, m) => s + m[1], 0)
+    const prev = last24.slice(-6, -3).reduce((s, m) => s + m[1], 0)
+    const momentum = prev > 0 ? Math.round(((tail - prev) / prev) * 100) : null
+    // Trend label
+    let trend = 'стабильный'
+    if (momentum != null) {
+      if (momentum >= 30) trend = 'растёт'
+      else if (momentum <= -30) trend = 'падает'
+    }
+    return { points: last24, maxCount, avgPerMonth, momentum, trend, total }
+  }, [reviews])
+
+  if (!data) return null
+
+  const W = 720, H = 180, padL = 50, padR = 20, padT = 20, padB = 30
+  const plotW = W - padL - padR
+  const plotH = H - padT - padB
+  const barW = plotW / data.points.length - 2
+  const trendColor =
+    data.trend === 'растёт' ? 'text-emerald-300' : data.trend === 'падает' ? 'text-red-300' : 'text-slate-300'
+
+  return (
+    <Card title="Темп отзывов" subtitle="отзывы в месяц за последние 24 мес — жива ли ниша" accent="cyan">
+      <div className="flex items-baseline gap-6 mb-3 text-sm">
+        <span className="text-slate-400">
+          Среднее: <strong className="text-slate-100">{Math.round(data.avgPerMonth)}/мес</strong>
+        </span>
+        <span className="text-slate-400">
+          Тренд:{' '}
+          <strong className={trendColor}>
+            {data.trend}
+            {data.momentum != null && ` (${data.momentum >= 0 ? '+' : ''}${data.momentum}%)`}
+          </strong>
+        </span>
+        <span className="text-slate-500 text-xs ml-auto">
+          выборка прогона: {data.total.toLocaleString()} отз. с датами
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+        <line x1={padL} y1={padT + plotH} x2={padL + plotW} y2={padT + plotH} stroke="#334155" />
+        {[0.25, 0.5, 0.75, 1].map((f, i) => (
+          <line
+            key={i}
+            x1={padL}
+            y1={padT + plotH - plotH * f}
+            x2={padL + plotW}
+            y2={padT + plotH - plotH * f}
+            stroke="#1e293b"
+            strokeDasharray="2 2"
+          />
+        ))}
+        <text x={padL - 6} y={padT + 5} fill="#94a3b8" fontSize="9" textAnchor="end">
+          {data.maxCount}
+        </text>
+        <text x={padL - 6} y={padT + plotH + 3} fill="#94a3b8" fontSize="9" textAnchor="end">
+          0
+        </text>
+        {data.points.map(([ym, count], i) => {
+          const h = (count / data.maxCount) * plotH
+          const x = padL + i * (plotW / data.points.length)
+          return (
+            <g key={ym}>
+              <rect x={x} y={padT + plotH - h} width={Math.max(1, barW)} height={h} fill="#22d3ee" opacity="0.7" />
+              <title>{`${ym}: ${count} отз.`}</title>
+            </g>
+          )
+        })}
+        {data.points.length > 0 && (
+          <>
+            <text x={padL} y={padT + plotH + 18} fill="#64748b" fontSize="9" textAnchor="start">
+              {data.points[0][0]}
+            </text>
+            <text x={padL + plotW} y={padT + plotH + 18} fill="#64748b" fontSize="9" textAnchor="end">
+              {data.points[data.points.length - 1][0]}
+            </text>
+          </>
+        )}
+      </svg>
+      <div className="text-[10px] text-slate-500 mt-2">
+        💡 Темп считается по датам собранных отзывов — это <strong>не</strong> объём поиска, это активность покупателей.
+        Если темп растёт — ниша созревает; падает — спрос остывает.
+      </div>
+    </Card>
+  )
+}
+
+function VulnerabilityScores({ products, reviews }: { products: ProductRow[]; reviews: ReviewRow[] }) {
+  const ranked = useMemo(() => {
+    if (products.length < 3) return []
+    const negsByProduct = new Map<string, number>()
+    for (const r of reviews) {
+      if (r.rating <= 2) negsByProduct.set(r.productId, (negsByProduct.get(r.productId) ?? 0) + 1)
+    }
+    const sortedPrices = products.map((p) => p.price).filter((p) => p > 0).sort((a, b) => a - b)
+    const medPrice = sortedPrices[Math.floor(sortedPrices.length / 2)] || 0
+
+    return [...products]
+      .filter((p) => p.reviewCount >= 5)
+      .sort((a, b) => b.reviewCount - a.reviewCount)
+      .slice(0, 15)
+      .map((p) => {
+        let score = 0
+        const factors: string[] = []
+        // Низкий рейтинг
+        if (p.rating > 0 && p.rating < 4.5) {
+          const r = (4.5 - p.rating) * 20
+          score += r
+          factors.push(`рейтинг ${p.rating} (+${Math.round(r)})`)
+        }
+        // Доля негатива у этого товара
+        const negs = negsByProduct.get(p.productId) ?? 0
+        if (negs >= 3) {
+          const n = Math.min(30, negs * 3)
+          score += n
+          factors.push(`${negs} негативов 1-2★ (+${n})`)
+        }
+        // Мало фото на карточке
+        if (p.imageCount <= 1) {
+          score += 10
+          factors.push('мало фото (+10)')
+        }
+        // Завышенная цена vs медианы
+        if (medPrice > 0 && p.price > medPrice * 1.4) {
+          const c = Math.min(20, Math.round(((p.price - medPrice) / medPrice) * 30))
+          score += c
+          factors.push(`цена +${Math.round(((p.price - medPrice) / medPrice) * 100)}% к медиане (+${c})`)
+        }
+        // Не Rocket — слабее по логистике
+        if (!p.isRocket) {
+          score += 5
+          factors.push('не Rocket (+5)')
+        }
+        return { product: p, score: Math.round(score), factors, negs }
+      })
+      .sort((a, b) => b.score - a.score)
+  }, [products, reviews])
+
+  if (ranked.length === 0) return null
+
+  return (
+    <Card title="Кого атаковать первым" subtitle="vulnerability score — чем выше, тем легче отбить долю" accent="amber">
+      <div className="space-y-2">
+        {ranked.slice(0, 8).map(({ product, score, factors }, i) => {
+          const color = score >= 50 ? 'text-red-300' : score >= 25 ? 'text-amber-300' : 'text-slate-400'
+          const bg = score >= 50 ? 'bg-red-500/10' : score >= 25 ? 'bg-amber-500/10' : 'bg-slate-800/50'
+          return (
+            <div key={product.productId} className={`${bg} rounded-lg p-3 flex items-center gap-3`}>
+              <div className={`text-2xl font-black ${color} w-12 text-center tabular-nums`}>{score}</div>
+              {product.firstImage && (
+                <a href={product.url} target="_blank" rel="noopener" className="shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={product.firstImage}
+                    alt=""
+                    className="w-12 h-12 object-cover rounded border border-slate-800"
+                  />
+                </a>
+              )}
+              <div className="flex-1 min-w-0">
+                <a
+                  href={product.url}
+                  target="_blank"
+                  rel="noopener"
+                  className="text-sm text-slate-100 hover:text-cyan-300 line-clamp-1"
+                >
+                  #{i + 1} {product.name}
+                </a>
+                <div className="flex items-center gap-3 text-xs text-slate-400 mt-0.5 flex-wrap">
+                  <span>{product.price.toLocaleString()}₩</span>
+                  <span>★{product.rating}</span>
+                  <span>{product.reviewCount.toLocaleString()} отз.</span>
+                  {factors.length > 0 && (
+                    <span className="text-slate-500 text-[10px]">· {factors.join(' · ')}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="text-[10px] text-slate-500 mt-3">
+        Формула: rating(20×gap), 1-2★ отзывы (×3), мало фото (+10), цена &gt; медианы +40% (×30), не-Rocket (+5).
+      </div>
+    </Card>
+  )
+}
+
+const DEFAULTS_KR = {
+  commission: 10.8, // Coupang fee
+  adRate: 5.0,
+  taxRate: 10.0, // VAT
+  costRate: 35.0, // wholesale as % of retail
+  rgFee: 2500, // logistics RG fee per item ₩
+}
+
+function UnitEconomics({ products }: { products: ProductRow[] }) {
+  const [commission, setCommission] = useState(DEFAULTS_KR.commission)
+  const [adRate, setAdRate] = useState(DEFAULTS_KR.adRate)
+  const [tax, setTax] = useState(DEFAULTS_KR.taxRate)
+  const [costRate, setCostRate] = useState(DEFAULTS_KR.costRate)
+  const [rgFee, setRgFee] = useState(DEFAULTS_KR.rgFee)
+
+  const stats = useMemo(() => {
+    const prices = products.map((p) => p.price).filter((p) => p > 0).sort((a, b) => a - b)
+    if (!prices.length) return null
+    return {
+      med: prices[Math.floor(prices.length / 2)],
+      p33: prices[Math.floor(prices.length * 0.33)],
+      p66: prices[Math.floor(prices.length * 0.66)],
+      min: prices[0],
+      max: prices[prices.length - 1],
+    }
+  }, [products])
+
+  if (!stats) return null
+
+  const calc = (price: number) => {
+    const cost = (price * costRate) / 100
+    const fees = (price * (commission + adRate)) / 100
+    const vat = (price * tax) / 100
+    const net = price - cost - fees - vat - rgFee
+    const margin = price > 0 ? (net / price) * 100 : 0
+    return { cost, fees, vat, net, margin, rgFee }
+  }
+  const breakEvenPrice = (() => {
+    // ищем минимальную цену при которой net >= 0
+    const denom = 1 - costRate / 100 - (commission + adRate) / 100 - tax / 100
+    if (denom <= 0) return null
+    return Math.ceil(rgFee / denom)
+  })()
+  const priceFor30 = (() => {
+    const denom = 1 - costRate / 100 - (commission + adRate) / 100 - tax / 100 - 0.3
+    if (denom <= 0) return null
+    return Math.ceil(rgFee / denom)
+  })()
+
+  const rows = [
+    { label: 'Бюджет (p33)', price: stats.p33 },
+    { label: 'Медиана', price: stats.med },
+    { label: 'Премиум (p66)', price: stats.p66 },
+  ]
+
+  return (
+    <Card title="Юнит-экономика" subtitle="можно ли тут зарабатывать (поправь параметры под себя)" accent="cyan">
+      <div className="grid grid-cols-5 gap-3 mb-4">
+        <NumberInput label="Закупка %" value={costRate} onChange={setCostRate} />
+        <NumberInput label="Комиссия %" value={commission} onChange={setCommission} />
+        <NumberInput label="Реклама %" value={adRate} onChange={setAdRate} />
+        <NumberInput label="НДС %" value={tax} onChange={setTax} />
+        <NumberInput label="RG fee ₩" value={rgFee} onChange={setRgFee} step={100} />
+      </div>
+
+      <div className="bg-slate-900 rounded-lg overflow-hidden mb-4">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-800/60 text-xs text-slate-400 uppercase tracking-wider">
+            <tr>
+              <th className="text-left px-3 py-2">Цена</th>
+              <th className="text-right px-3 py-2">Закупка</th>
+              <th className="text-right px-3 py-2">Fees</th>
+              <th className="text-right px-3 py-2">НДС</th>
+              <th className="text-right px-3 py-2">RG</th>
+              <th className="text-right px-3 py-2">Чистая</th>
+              <th className="text-right px-3 py-2">Маржа</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ label, price }) => {
+              const c = calc(price)
+              const marginColor =
+                c.margin >= 25 ? 'text-emerald-300' : c.margin >= 10 ? 'text-amber-300' : 'text-red-300'
+              return (
+                <tr key={label} className="border-t border-slate-800">
+                  <td className="px-3 py-2">
+                    <div className="text-slate-200 font-medium">{label}</div>
+                    <div className="text-xs text-slate-500 tabular-nums">{price.toLocaleString()}₩</div>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-400">
+                    −{Math.round(c.cost).toLocaleString()}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-400">
+                    −{Math.round(c.fees).toLocaleString()}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-400">
+                    −{Math.round(c.vat).toLocaleString()}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-400">
+                    −{c.rgFee.toLocaleString()}
+                  </td>
+                  <td className={`px-3 py-2 text-right tabular-nums font-semibold ${c.net >= 0 ? 'text-slate-100' : 'text-red-300'}`}>
+                    {Math.round(c.net).toLocaleString()}₩
+                  </td>
+                  <td className={`px-3 py-2 text-right tabular-nums font-bold ${marginColor}`}>
+                    {c.margin.toFixed(1)}%
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <div className="bg-slate-900 rounded p-3">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Break-even цена</div>
+          <div className="text-lg font-bold text-slate-100 tabular-nums">
+            {breakEvenPrice != null ? `${breakEvenPrice.toLocaleString()}₩` : 'нереально'}
+          </div>
+          <div className="text-[10px] text-slate-500 mt-1">ниже — работаешь в минус</div>
+        </div>
+        <div className="bg-slate-900 rounded p-3">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Цена для маржи 30%</div>
+          <div
+            className={`text-lg font-bold tabular-nums ${
+              priceFor30 == null
+                ? 'text-red-300'
+                : priceFor30 <= stats.max
+                ? 'text-emerald-300'
+                : 'text-amber-300'
+            }`}
+          >
+            {priceFor30 != null ? `${priceFor30.toLocaleString()}₩` : 'нереально'}
+          </div>
+          <div className="text-[10px] text-slate-500 mt-1">
+            {priceFor30 != null && priceFor30 <= stats.max
+              ? `в пределах рыночного диапазона`
+              : 'выше топа ниши — придётся либо снижать закупку, либо игнорить нишу'}
+          </div>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function NumberInput({
+  label,
+  value,
+  onChange,
+  step = 0.1,
+}: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+  step?: number
+}) {
+  return (
+    <label className="block">
+      <span className="text-[10px] uppercase tracking-wider text-slate-500">{label}</span>
+      <input
+        type="number"
+        value={value}
+        step={step}
+        onChange={(e) => onChange(Number(e.target.value) || 0)}
+        className="mt-1 w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm text-slate-100 tabular-nums focus:outline-none focus:border-cyan-500"
+      />
+    </label>
+  )
+}
+
+function VisionInsightsCard({
+  vi,
+  running,
+  error,
+  hasPhotos,
+  onRun,
+}: {
+  vi: VisionInsights | null
+  running: boolean
+  error: string | null
+  hasPhotos: boolean
+  onRun: () => void
+}) {
+  if (!vi) {
+    return (
+      <Card title="Vision-разбор фото отзывов" subtitle="как реально юзают товар и что снимать в листинге" accent="amber">
+        <p className="text-sm text-slate-300 mb-3">
+          {hasPhotos
+            ? 'AI разберёт фото покупателей и выдаст use-cases, частые дефекты, чек-лист фото для своего листинга.'
+            : 'Нет фото в собранных отзывах. Пересобери прогон или попробуй на нише где больше фото.'}
+        </p>
+        {error && (
+          <div className="text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded p-2 mb-3">{error}</div>
+        )}
+        <button
+          onClick={onRun}
+          disabled={running || !hasPhotos}
+          className="bg-amber-500/20 hover:bg-amber-500/30 disabled:opacity-40 disabled:cursor-not-allowed text-amber-200 border border-amber-500/40 text-sm px-4 py-2 rounded transition-colors"
+        >
+          {running ? 'Vision работает... (~45 сек)' : 'Запустить Vision-разбор'}
+        </button>
+        <p className="text-[10px] text-slate-500 mt-2">~30¢ за прогон (30 фото через Claude Sonnet).</p>
+      </Card>
+    )
+  }
+  return (
+    <Card
+      title="Vision-разбор фото отзывов"
+      subtitle={`на основе ${vi.totalPhotosAnalyzed} фото покупателей`}
+      accent="cyan"
+    >
+      {vi.buyerProfile && (
+        <div className="bg-slate-900 rounded p-3 mb-4 text-sm">
+          <div className="text-[10px] uppercase tracking-wider text-cyan-400 mb-1">Типичный покупатель</div>
+          <p className="text-slate-300">{vi.buyerProfile}</p>
+        </div>
+      )}
+
+      {vi.useCases.length > 0 && (
+        <div className="mb-4">
+          <h4 className="text-xs uppercase tracking-wider text-slate-500 mb-2">Сценарии использования</h4>
+          <div className="grid grid-cols-2 gap-2">
+            {vi.useCases.map((u, i) => (
+              <div key={i} className="bg-slate-900 rounded p-3 border-l-2 border-cyan-500/40">
+                <div className="flex items-baseline gap-2 mb-1">
+                  <span className="font-medium text-slate-100">{u.context}</span>
+                  <ShareBadge share={u.share} />
+                  <span className="text-xs text-slate-500 ml-auto">×{u.count}</span>
+                </div>
+                <p className="text-xs text-slate-400">{u.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {vi.commonDefects.length > 0 && (
+        <div className="mb-4">
+          <h4 className="text-xs uppercase tracking-wider text-red-400 mb-2">Частые дефекты в негативных фото</h4>
+          <div className="space-y-2">
+            {vi.commonDefects.map((d, i) => (
+              <div key={i} className="bg-slate-900 rounded p-3 border-l-2 border-red-500/40">
+                <div className="flex items-baseline gap-2 mb-1">
+                  <SeverityBadge severity={d.severity} />
+                  <span className="font-medium text-slate-100 flex-1">{d.defect}</span>
+                  <span className="text-xs text-slate-500">×{d.mentions}</span>
+                </div>
+                <p className="text-xs text-slate-400">{d.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {vi.photoOpportunities.length > 0 && (
+        <div>
+          <h4 className="text-xs uppercase tracking-wider text-emerald-400 mb-2">
+            Что снять в своём листинге (чек-лист)
+          </h4>
+          <ul className="space-y-1.5">
+            {vi.photoOpportunities.map((o, i) => (
+              <li key={i} className="flex gap-2 items-start text-sm bg-slate-900 rounded p-2.5">
+                <PriorityBadge priority={o.priority} />
+                <div className="flex-1">
+                  <p className="text-slate-200">{o.opportunity}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">↳ {o.why}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="text-[10px] text-slate-500 mt-3">
+        Сгенерировано: {new Date(vi.generatedAt).toLocaleString('ru-RU')}.{' '}
+        <button onClick={onRun} disabled={running} className="text-cyan-400 hover:text-cyan-300 disabled:opacity-50">
+          {running ? 'обновляется...' : 'перегенерировать'}
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+function ListingDraftCard({
+  ld,
+  running,
+  error,
+  onRun,
+}: {
+  ld: ListingDraft | null
+  running: boolean
+  error: string | null
+  onRun: () => void
+}) {
+  if (!ld) {
+    return (
+      <Card title="AI-драфт листинга" subtitle="готовый KR title + bullets + описание + цена" accent="amber">
+        <p className="text-sm text-slate-300 mb-3">
+          Один Claude-запрос синтезирует листинг из всех собранных данных (pains, positives, pre-fears, цены лидеров,
+          хэштеги). Получишь корейский title с ключом, 5 буллетов закрывающих pre-fears, описание против слабостей
+          топ-3, цену и чек-лист фото.
+        </p>
+        {error && (
+          <div className="text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded p-2 mb-3">{error}</div>
+        )}
+        <button
+          onClick={onRun}
+          disabled={running}
+          className="bg-amber-500/20 hover:bg-amber-500/30 disabled:opacity-40 disabled:cursor-not-allowed text-amber-200 border border-amber-500/40 text-sm px-4 py-2 rounded transition-colors"
+        >
+          {running ? 'Claude думает... (~30 сек)' : 'Сгенерировать драфт листинга'}
+        </button>
+        <p className="text-[10px] text-slate-500 mt-2">~5¢ за драфт.</p>
+      </Card>
+    )
+  }
+  return (
+    <Card title="AI-драфт листинга" subtitle="готов к копированию" accent="cyan">
+      <div className="space-y-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-cyan-400 mb-1">Корейское название</div>
+          <div className="bg-slate-900 rounded p-3 font-medium text-slate-100 break-words">{ld.koreanTitle}</div>
+          <div className="text-xs text-slate-500 mt-1">{ld.ruTranslationOfTitle}</div>
+        </div>
+
+        {ld.bullets.length > 0 && (
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-cyan-400 mb-2">5 буллетов</div>
+            <div className="space-y-2">
+              {ld.bullets.map((b, i) => (
+                <div key={i} className="bg-slate-900 rounded p-3">
+                  <div className="text-slate-100 font-medium mb-1">
+                    {i + 1}. {b.ko}
+                  </div>
+                  <div className="text-xs text-slate-400">{b.ru}</div>
+                  {b.addresses && (
+                    <div className="text-[10px] text-emerald-400/80 mt-1">
+                      ↳ закрывает: <em>{b.addresses}</em>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {ld.description.ko && (
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-cyan-400 mb-1">Описание</div>
+            <div className="bg-slate-900 rounded p-3 text-sm text-slate-100 whitespace-pre-wrap">
+              {ld.description.ko}
+            </div>
+            <div className="text-xs text-slate-500 mt-1 whitespace-pre-wrap">{ld.description.ru}</div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-slate-900 rounded p-3">
+            <div className="text-[10px] uppercase tracking-wider text-cyan-400 mb-1">Рекомендованная цена</div>
+            <div className="text-2xl font-bold text-slate-100 tabular-nums">
+              {ld.pricingSuggestion.recommended.toLocaleString()}₩
+            </div>
+            <div className="text-xs text-slate-400 mt-1">{ld.pricingSuggestion.reasoning}</div>
+          </div>
+          <div className="bg-slate-900 rounded p-3">
+            <div className="text-[10px] uppercase tracking-wider text-cyan-400 mb-1">Позиционирование</div>
+            <p className="text-sm text-slate-200">{ld.positioning}</p>
+          </div>
+        </div>
+
+        {ld.imagesChecklist.length > 0 && (
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-cyan-400 mb-2">Чек-лист фото для листинга</div>
+            <ol className="space-y-1.5">
+              {ld.imagesChecklist.map((c, i) => (
+                <li key={i} className="text-sm bg-slate-900 rounded p-2.5 flex gap-2">
+                  <span className="text-cyan-400 font-bold shrink-0 tabular-nums">{i + 1}.</span>
+                  <span className="text-slate-200">{c}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+
+        <div className="text-[10px] text-slate-500">
+          Сгенерировано: {new Date(ld.generatedAt).toLocaleString('ru-RU')}.{' '}
+          <button onClick={onRun} disabled={running} className="text-cyan-400 hover:text-cyan-300 disabled:opacity-50">
+            {running ? 'обновляется...' : 'перегенерировать'}
+          </button>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function NaverTrendsCard({
+  nt,
+  running,
+  error,
+  onRun,
+}: {
+  nt: NaverTrendsResult | null
+  running: boolean
+  error: string | null
+  onRun: () => void
+}) {
+  if (!nt) {
+    return (
+      <Card title="Google Trends — 12 мес" subtitle="сезонность ключевика" accent="amber">
+        <p className="text-sm text-slate-300 mb-3">
+          Тренд популярности ключевика в Корее за последние 12 месяцев. Поможет понять — сезонный товар или нет, когда
+          лучше заводить рекламу.
+        </p>
+        {error && (
+          <div className="text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded p-2 mb-3">{error}</div>
+        )}
+        <button
+          onClick={onRun}
+          disabled={running}
+          className="bg-amber-500/20 hover:bg-amber-500/30 disabled:opacity-40 disabled:cursor-not-allowed text-amber-200 border border-amber-500/40 text-sm px-4 py-2 rounded transition-colors"
+        >
+          {running ? 'Загрузка трендов...' : 'Получить тренды'}
+        </button>
+        <p className="text-[10px] text-slate-500 mt-2">Бесплатно через google-trends-api.</p>
+      </Card>
+    )
+  }
+  const W = 720, H = 160, padL = 30, padR = 20, padT = 15, padB = 30
+  const plotW = W - padL - padR
+  const plotH = H - padT - padB
+  const maxRatio = Math.max(...nt.points.map((p) => p.ratio), 1)
+  const xOf = (i: number) => padL + (i / Math.max(nt.points.length - 1, 1)) * plotW
+  const yOf = (v: number) => padT + plotH - (v / maxRatio) * plotH
+  const path = nt.points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xOf(i).toFixed(1)},${yOf(p.ratio).toFixed(1)}`).join(' ')
+  const seasonalLabel: Record<typeof nt.seasonality, string> = {
+    highly_seasonal: '⚠️ сильно сезонный',
+    seasonal: '🟡 сезонный',
+    stable: '🟢 стабильный',
+    unknown: '— нет данных',
+  }
+  return (
+    <Card title={`Google Trends — "${nt.keyword}"`} subtitle="12 месяцев интереса в Корее" accent="cyan">
+      <div className="flex items-baseline gap-6 mb-3 text-sm flex-wrap">
+        <span className="text-slate-400">Сезонность: <strong className="text-slate-100">{seasonalLabel[nt.seasonality]}</strong></span>
+        {nt.peakMonth && (
+          <span className="text-slate-400">
+            Пик: <strong className="text-emerald-300">{nt.peakMonth.period}</strong> ({nt.peakMonth.ratio})
+          </span>
+        )}
+        {nt.troughMonth && (
+          <span className="text-slate-400">
+            Минимум: <strong className="text-red-300">{nt.troughMonth.period}</strong> ({nt.troughMonth.ratio})
+          </span>
+        )}
+        {nt.yoyChange != null && (
+          <span className="text-slate-400">
+            YoY: <strong className={nt.yoyChange >= 0 ? 'text-emerald-300' : 'text-red-300'}>
+              {nt.yoyChange >= 0 ? '+' : ''}{nt.yoyChange}%
+            </strong>
+          </span>
+        )}
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+        <line x1={padL} y1={padT + plotH} x2={padL + plotW} y2={padT + plotH} stroke="#334155" />
+        <path d={path} fill="none" stroke="#22d3ee" strokeWidth="2" />
+        <path d={`${path} L${xOf(nt.points.length - 1)},${padT + plotH} L${padL},${padT + plotH} Z`} fill="rgba(34,211,238,0.15)" />
+        {nt.points.map((p, i) => (
+          <circle key={i} cx={xOf(i)} cy={yOf(p.ratio)} r="2" fill="#22d3ee">
+            <title>{`${p.period}: ${p.ratio}`}</title>
+          </circle>
+        ))}
+        <text x={padL} y={padT + plotH + 18} fill="#64748b" fontSize="9" textAnchor="start">
+          {nt.points[0]?.period}
+        </text>
+        <text x={padL + plotW} y={padT + plotH + 18} fill="#64748b" fontSize="9" textAnchor="end">
+          {nt.points[nt.points.length - 1]?.period}
+        </text>
+      </svg>
+      <div className="text-[10px] text-slate-500 mt-2">
+        Шкала Google Trends: 0-100 относительно пика за период. Сгенерировано: {new Date(nt.generatedAt).toLocaleString('ru-RU')}.{' '}
+        <button onClick={onRun} disabled={running} className="text-cyan-400 hover:text-cyan-300 disabled:opacity-50">
+          {running ? 'обновление...' : 'обновить'}
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+function AIEmptyCallout({
+  hasReviews,
+  onRun,
+  running,
+  error,
+}: {
+  hasReviews: boolean
+  onRun: () => void
+  running: boolean
+  error: string | null
+}) {
+  return (
+    <Card title="AI-разбор отзывов" subtitle="pains / positives / pre-fears" accent="amber">
+      <p className="text-sm text-slate-300 mb-3">
+        {hasReviews
+          ? 'Отзывы собраны, но AI ещё не разобрал их по темам. Запусти разбор — это сделает «Боль клиентов», «Что хвалят» и «Страхи до покупки», даст 6 табов в Google Sheets и стратегические инсайты.'
+          : 'Слишком мало отзывов (нужно ≥10). Запусти прогон скрипта на большую категорию.'}
+      </p>
+      {error && (
+        <div className="text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded p-2 mb-3">
+          {error}
+        </div>
+      )}
+      <button
+        onClick={onRun}
+        disabled={running || !hasReviews}
+        className="bg-amber-500/20 hover:bg-amber-500/30 disabled:opacity-40 disabled:cursor-not-allowed text-amber-200 border border-amber-500/40 text-sm px-4 py-2 rounded transition-colors"
+      >
+        {running ? 'AI работает... (~30 сек)' : 'Запустить AI-разбор'}
+      </button>
+      <p className="text-[10px] text-slate-500 mt-2">
+        Нужен <span className="font-mono">ANTHROPIC_API_KEY</span> в .env.local. Стоимость ~3-5¢ на прогон.
+      </p>
+    </Card>
   )
 }
 

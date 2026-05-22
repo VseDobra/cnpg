@@ -131,6 +131,9 @@ model ScraperRun {
   productCount Int      @default(0)
   searchVolume String?  // JSON NicheSearchSummary from Naver Ads (seed + related)
   aiExtended   String?  // JSON ExtendedAnalysis (positive_drivers, improvement_areas, etc.)
+  visionInsights String?  // JSON VisionInsights — Claude Vision analysis of review photos
+  listingDraft   String?  // JSON ListingDraft — AI-generated Korean listing copy
+  naverTrends    String?  // JSON 12-month Google Trends data for seed keyword
 
   products  ScrapedProduct[]
   reviews   ScrapedReview[]
@@ -225,4 +228,18 @@ model ScrapedTopic {
   run ScraperRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@index([runId])
+}
+
+model RerunQueueItem {
+  id              String   @id @default(cuid())
+  runId           String   // оригинальный прогон, который надо пересмотреть
+  keyword         String
+  createdAt       DateTime @default(now())
+  status          String   @default("pending") // pending | completed | dismissed
+  completedRunId  String?  // новый ScraperRun после ручной пересборки
+  completedAt     DateTime?
+  reason          String?  // почему попал в очередь: "MAYBE >7d" и т.п.
+
+  @@index([status])
+  @@index([keyword])
 }

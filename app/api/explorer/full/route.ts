@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { writeNicheAnalysis, type Review, type Product, type Tag, type Question } from '@/lib/google/sheets-analysis'
 import { analyzeReviewsAI, writeAIAnalysisToSheet, type AIAnalysis } from '@/lib/google/sheets-ai'
 import { getKeywordStats, summarize, type NicheSearchSummary } from '@/lib/naver/ads'
+import { linkCompletedRun } from '@/lib/explorer/rerun-scan'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -247,6 +248,15 @@ export async function POST(req: NextRequest) {
         analysis,
         searchVolume,
       })
+      // Auto-close pending rerun-queue items с тем же keyword.
+      if (runId && keyword) {
+        try {
+          const closed = await linkCompletedRun(keyword, runId)
+          if (closed) console.log(`[explorer/full] закрыто ${closed} элементов очереди для "${keyword}"`)
+        } catch (e) {
+          console.error('[explorer/full] linkCompletedRun failed:', e)
+        }
+      }
     } catch (e) {
       console.error('[scrape/full] DB persist failed:', e)
     }

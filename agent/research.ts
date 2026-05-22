@@ -479,6 +479,7 @@ async function researchBatch(keywords: string[]) {
       trendChange: trends?.change ?? null,
       insightChange: insight?.change ?? null,
       medianPrice: prices?.median ?? null,
+      verdict,
     })
     console.log(`✓  [${categoryName}]`)
   }

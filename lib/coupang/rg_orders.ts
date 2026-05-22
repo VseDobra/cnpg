@@ -29,8 +29,8 @@ export async function fetchRgOrders(from: Date, to: Date): Promise<RgOrder[]> {
   let nextToken: string | null = null
 
   do {
-    const query = `vendorId=${VENDOR_ID}&paidDateFrom=${fmtDate(from)}&paidDateTo=${fmtDate(to)}${nextToken ? `&nextToken=${nextToken}` : ''}`
-    const path = `/v2/providers/rg_open_api/apis/api/v1/vendors/${VENDOR_ID}/rg/orders?${query}`
+    const query: string = `vendorId=${VENDOR_ID}&paidDateFrom=${fmtDate(from)}&paidDateTo=${fmtDate(to)}${nextToken ? `&nextToken=${nextToken}` : ''}`
+    const path: string = `/v2/providers/rg_open_api/apis/api/v1/vendors/${VENDOR_ID}/rg/orders?${query}`
     const res = await coupangRequest<{ data: RgOrder[]; nextToken?: string }>('GET', path)
     results.push(...(res.data ?? []))
     nextToken = res.nextToken ?? null

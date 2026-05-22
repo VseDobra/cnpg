@@ -36,7 +36,7 @@ export default function DowHeatmap({ data }: Props) {
           <LabelList
             dataKey="amount"
             position="top"
-            formatter={formatK}
+            formatter={(value) => formatK(Number(value ?? 0))}
             style={{ fill: '#cbd5e1', fontSize: 11, fontWeight: 500 }}
           />
         </Bar>

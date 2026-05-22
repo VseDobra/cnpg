@@ -48,7 +48,7 @@ export async function writeReviewsToSheet(sheetId: string, sheetName: string, re
   // Write headers + data
   const rows = [
     HEADERS,
-    ...reviews.map(r => HEADERS.map(h => String((r as Record<string, unknown>)[h] ?? ''))),
+    ...reviews.map(r => HEADERS.map(h => String((r as unknown as Record<string, unknown>)[h] ?? ''))),
   ]
 
   await sheets.spreadsheets.values.update({

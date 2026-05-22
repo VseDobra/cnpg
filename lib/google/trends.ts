@@ -25,8 +25,13 @@ export async function fetchGoogleTrends(
         geo,
       })
       const parsed = JSON.parse(raw)
-      const timelineData: Array<{ formattedTime: string; formattedAxisTime: string; value: number[] }> =
-        parsed?.default?.timelineData ?? []
+      const timelineData: Array<{
+        formattedTime: string
+        formattedAxisTime: string
+        value: number[]
+        time?: string
+        hasData?: boolean[]
+      }> = parsed?.default?.timelineData ?? []
 
       results.push({
         title: keyword,

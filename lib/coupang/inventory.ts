@@ -15,8 +15,8 @@ export async function fetchRgInventory(): Promise<RgInventorySummary[]> {
   let nextToken: string | null = null
 
   do {
-    const query = nextToken ? `?nextToken=${nextToken}` : ''
-    const path = `/v2/providers/rg_open_api/apis/api/v1/vendors/${VENDOR_ID}/rg/inventory/summaries${query}`
+    const query: string = nextToken ? `?nextToken=${nextToken}` : ''
+    const path: string = `/v2/providers/rg_open_api/apis/api/v1/vendors/${VENDOR_ID}/rg/inventory/summaries${query}`
     const res = await coupangRequest<{ data: RgInventorySummary[]; nextToken: string | null }>('GET', path)
     results.push(...(res.data ?? []))
     nextToken = res.nextToken ?? null

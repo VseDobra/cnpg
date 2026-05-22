@@ -21,7 +21,7 @@ function getDatetime(): string {
   return `${yy}${MM}${dd}T${HH}${mm}${ss}Z`
 }
 
-export async function coupangRequest<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<T> {
+export async function coupangRequest<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
   const accessKey = process.env.COUPANG_ACCESS_KEY!
   const secretKey = process.env.COUPANG_SECRET_KEY!
   const datetime = getDatetime()
